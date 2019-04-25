@@ -24,7 +24,7 @@
 
 int main()
 {
-    uint32_t cf8 = 0;
+    unsigned int cf8 = 0;
 
     printf("cf8 is enabled: %d\n", cf8_is_enabled(cf8));
     printf("cf8 is enabled: %d\n", cf8_is_enabled(cf8 | (1UL << 31)));

@@ -26,9 +26,6 @@
 extern "C" {
 #endif
 
-long xue_init(void);
-long xue_send(const char *data, unsigned long size);
-
 #ifdef __cplusplus
 }
 #endif

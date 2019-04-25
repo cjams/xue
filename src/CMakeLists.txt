@@ -19,15 +19,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-cmake_minimum_required(VERSION 3.14)
-project(xue)
-
-include(ProcessorCount)
-enable_language(ASM_NASM)
-
-set(BUILD_SHARED_LIBS OFF)
-set(CMAKE_C_STANDARD 11)
-set(CMAKE_C_EXTENSIONS OFF)
-
-add_subdirectory(src)
-add_subdirectory(test)
+add_library(xue)
+target_sources(xue PRIVATE xhc.c portio.asm)
+target_include_directories(xue PRIVATE ${PROJECT_SOURCE_DIR}/include)

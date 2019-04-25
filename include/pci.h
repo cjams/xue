@@ -28,29 +28,42 @@ extern "C" {
 
 #include "portio.h"
 
+/* PCI config helpers */
 static inline int cf8_is_enabled(unsigned int cf8)
-{ return ((cf8 & 0x80000000UL) >> 31) != 0; }
+{
+    return ((cf8 & 0x80000000UL) >> 31) != 0;
+}
 
 static inline unsigned int cf8_to_bus(unsigned int cf8)
-{ return (cf8 & 0x00FF0000UL) >> 16; }
+{
+    return (cf8 & 0x00FF0000UL) >> 16;
+}
 
 static inline unsigned int cf8_to_dev(unsigned int cf8)
-{ return (cf8 & 0x0000F800UL) >> 11; }
+{
+    return (cf8 & 0x0000F800UL) >> 11;
+}
 
 static inline unsigned int cf8_to_fun(unsigned int cf8)
-{ return (cf8 & 0x00000700UL) >> 8; }
+{
+    return (cf8 & 0x00000700UL) >> 8;
+}
 
 static inline unsigned int cf8_to_reg(unsigned int cf8)
-{ return (cf8 & 0x000000FCUL) >> 2; }
+{
+    return (cf8 & 0x000000FCUL) >> 2;
+}
 
 static inline unsigned int cf8_to_off(unsigned int cf8)
-{ return (cf8 & 0x00000003UL); }
+{
+    return (cf8 & 0x00000003UL);
+}
 
 static inline unsigned int cf8_read_reg(unsigned int cf8, unsigned int reg)
 {
     const unsigned int addr = (cf8 & 0xFFFFFF03UL) | (reg << 2);
-    _outd(0xCF8, addr);
-    return _ind(0xCFC);
+    xue_outd(0xCF8, addr);
+    return xue_ind(0xCFC);
 }
 
 static inline void cf8_write_reg(unsigned int cf8,
@@ -58,8 +71,26 @@ static inline void cf8_write_reg(unsigned int cf8,
                                  unsigned int val)
 {
     const unsigned int addr = (cf8 & 0xFFFFFF03UL) | (reg << 2);
-    _outd(0xCF8, addr);
-    _outd(0xCFC, val);
+    xue_outd(0xCF8, addr);
+    xue_outd(0xCFC, val);
+}
+
+static inline unsigned int bdf_to_cf8(unsigned int b,
+                                      unsigned int d,
+                                      unsigned int f)
+{
+    return (1UL << 31) | (b << 16) | (d << 11) | (f << 8);
+}
+
+static inline int cf8_exists(unsigned int cf8)
+{
+    return cf8_read_reg(cf8, 0) != 0xFFFFFFFFUL;
+}
+
+static inline unsigned int pci_hdr_type(unsigned int cf8)
+{
+    const unsigned int val = cf8_read_reg(cf8, 3);
+    return (val & 0x00FF0000UL) >> 16;
 }
 
 #ifdef __cplusplus
