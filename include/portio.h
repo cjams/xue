@@ -26,31 +26,13 @@
 extern "C" {
 #endif
 
-#include <stdint.h>
+int xue_inb(unsigned int port);
+int xue_inw(unsigned int port);
+int xue_ind(unsigned int port);
 
-uint8_t _inb(uint16_t port);
-uint16_t _inw(uint16_t port);
-uint32_t _ind(uint16_t port);
-
-void _insb(uint16_t port, uint64_t m8);
-void _insw(uint16_t port, uint64_t m16);
-void _insd(uint16_t port, uint64_t m32);
-
-void _insbrep(uint16_t port, uint64_t m8, uint32_t count);
-void _inswrep(uint16_t port, uint64_t m16, uint32_t count);
-void _insdrep(uint16_t port, uint64_t m32, uint32_t count);
-
-void _outb(uint16_t port, uint8_t val);
-void _outw(uint16_t port, uint16_t val);
-void _outd(uint16_t port, uint32_t val);
-
-void _outsb(uint16_t port, uint64_t m8);
-void _outsw(uint16_t port, uint64_t m16);
-void _outsd(uint16_t port, uint64_t m32);
-
-void _outsbrep(uint16_t port, uint64_t m8, uint32_t count);
-void _outswrep(uint16_t port, uint64_t m16, uint32_t count);
-void _outsdrep(uint16_t port, uint64_t m32, uint32_t count);
+void xue_outb(unsigned int port, unsigned int val);
+void xue_outw(unsigned int port, unsigned int val);
+void xue_outd(unsigned int port, unsigned int val);
 
 #ifdef __cplusplus
 }

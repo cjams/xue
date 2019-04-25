@@ -32,4 +32,4 @@ set(CMAKE_C_EXTENSIONS OFF)
 add_library(xue)
 target_sources(xue PRIVATE src/portio.asm)
 
-add_subdirectory(test)
+#add_subdirectory(test)

@@ -19,48 +19,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#ifndef XUE_PCI_H
-#define XUE_PCI_H
+#ifndef XUE_H
+#define XUE_H
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#include "portio.h"
-
-static inline int cf8_is_enabled(unsigned int cf8)
-{ return ((cf8 & 0x80000000UL) >> 31) != 0; }
-
-static inline unsigned int cf8_to_bus(unsigned int cf8)
-{ return (cf8 & 0x00FF0000UL) >> 16; }
-
-static inline unsigned int cf8_to_dev(unsigned int cf8)
-{ return (cf8 & 0x0000F800UL) >> 11; }
-
-static inline unsigned int cf8_to_fun(unsigned int cf8)
-{ return (cf8 & 0x00000700UL) >> 8; }
-
-static inline unsigned int cf8_to_reg(unsigned int cf8)
-{ return (cf8 & 0x000000FCUL) >> 2; }
-
-static inline unsigned int cf8_to_off(unsigned int cf8)
-{ return (cf8 & 0x00000003UL); }
-
-static inline unsigned int cf8_read_reg(unsigned int cf8, unsigned int reg)
-{
-    const unsigned int addr = (cf8 & 0xFFFFFF03UL) | (reg << 2);
-    _outd(0xCF8, addr);
-    return _ind(0xCFC);
-}
-
-static inline void cf8_write_reg(unsigned int cf8,
-                                 unsigned int reg,
-                                 unsigned int val)
-{
-    const unsigned int addr = (cf8 & 0xFFFFFF03UL) | (reg << 2);
-    _outd(0xCF8, addr);
-    _outd(0xCFC, val);
-}
+long xue_init(void);
+long xue_send(const char *data, unsigned long size);
 
 #ifdef __cplusplus
 }
