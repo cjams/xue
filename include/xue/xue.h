@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-#define TEST_XHC_INIT 1
+#define XUE_INIT 1
 
 void xue_init(void);
 

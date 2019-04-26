@@ -19,17 +19,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <stdint.h>
-#include <xue/xue.h>
+#include <xhc.h>
 
-void _vmcall(uint64_t rax, uint64_t rbx, uint64_t rcx, uint64_t rdx);
-
-static inline void test(uint64_t rax)
+void xue_init(void)
 {
-    _vmcall(rax, 0, 0, 0);
-}
+    if (!xhc_find()) {
+        return;
+    }
 
-int main()
-{
-    test(XUE_INIT);
+    if (!xhc_parse_mmio()) {
+        return;
+    }
 }

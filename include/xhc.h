@@ -19,17 +19,16 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <stdint.h>
-#include <xue/xue.h>
+/**
+ * find_xhc
+ *
+ * Scan PCI bus 0 for the xhc device
+ *
+ */
+int xhc_find(void);
 
-void _vmcall(uint64_t rax, uint64_t rbx, uint64_t rcx, uint64_t rdx);
-
-static inline void test(uint64_t rax)
-{
-    _vmcall(rax, 0, 0, 0);
-}
-
-int main()
-{
-    test(XUE_INIT);
-}
+/**
+ * According to the xHCI spec, section 5.2.1, an xhc must only
+ * have one 64-bit MMIO bar
+ */
+int xhc_parse_mmio(void);

@@ -29,8 +29,8 @@
 #define NR_DEV 32
 #define NR_FUN 8
 
-#define XHC_VENDOR 0x8086
-#define XHC_CLASSC 0x0C0330
+#define XHC_DEVVEN 0xA2AF8086
+#define XHC_CLASSC 0x000C0330
 
 enum {
     pci_hdr_normal               = 0x00,
@@ -65,7 +65,7 @@ static int matches_xhc(unsigned int cf8)
         return 0;
     }
 
-    if ((cf8_read_reg(cf8, 0) & 0xFFFF) != XHC_VENDOR) {
+    if (cf8_read_reg(cf8, 0) != XHC_DEVVEN) {
         return 0;
     }
 
@@ -108,12 +108,10 @@ int xhc_find(void)
  * According to the xHCI spec, section 5.2.1, an xhc must only
  * have one 64-bit MMIO bar
  */
-int xhc_parse_mmio()
+int xhc_parse_mmio(void)
 {
     unsigned int bar0 = xhc_read_reg(4);
     unsigned int bar1 = xhc_read_reg(5);
-
-    printf("xhc_parse_mmio\n");
 
     /* IO bars not allowed */
     if ((bar0 & 0x1) != 0) {
@@ -138,16 +136,4 @@ int xhc_parse_mmio()
     printf("    - mmio phys: 0x%llx\n", g_xhc.mmio_phys);
 
     return 1;
-}
-
-void xue_init(void)
-{
-    printf("xue_init\n");
-    if (!xhc_find()) {
-        return;
-    }
-
-    if (!xhc_parse_mmio()) {
-        return;
-    }
 }
