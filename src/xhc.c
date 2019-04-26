@@ -19,12 +19,22 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include <stddef.h>
 #include <stdio.h>
 #include <pci.h>
+#include <xhc.h>
 
 /**
- * PCI constants
+ * eXtensible Host Controller (xhc)
+ *
+ * The DbC is an optional xHCI extended capability. Before the DbC can be used,
+ * it needs to be found in the host controller's extended capability list. This
+ * list resides in the controller's MMIO region, which in turn is referred to
+ * by the 64-bit BAR0/BAR1 in the controller's PCI config space.
+ *
  */
+
+/* PCI constants */
 
 #define NR_DEV 32
 #define NR_FUN 8
@@ -43,11 +53,7 @@ enum {
 };
 
 /* xhc device */
-struct xhc {
-    unsigned long long cf8;
-    unsigned long long mmio_size;
-    unsigned long long mmio_phys;
-} g_xhc;
+struct xhc g_xhc;
 
 static inline unsigned int xhc_read_reg(unsigned int reg)
 {
@@ -59,7 +65,7 @@ static inline void xhc_write_reg(unsigned int reg, unsigned int val)
     cf8_write_reg(g_xhc.cf8, reg, val);
 }
 
-static int matches_xhc(unsigned int cf8)
+static int xhc_matches(unsigned int cf8)
 {
     if (!cf8_exists(cf8)) {
         return 0;
@@ -80,19 +86,13 @@ static int matches_xhc(unsigned int cf8)
     return (cf8_read_reg(cf8, 2) >> 8) == XHC_CLASSC;
 }
 
-/**
- * find_xhc
- *
- * Scan PCI bus 0 for the xhc device
- *
- */
 int xhc_find(void)
 {
     for (int d = 0; d < NR_DEV; d++) {
         for (int f = 0; f < NR_FUN; f++) {
             unsigned int cf8 = bdf_to_cf8(0, d, f);
 
-            if (matches_xhc(cf8)) {
+            if (xhc_matches(cf8)) {
                 g_xhc.cf8 = bdf_to_cf8(0, d, f);
                 printf("Located xHC device at %02x:%02x.%02x\n", 0, d, f);
                 return 1;
@@ -104,11 +104,7 @@ int xhc_find(void)
     return 0;
 }
 
-/**
- * According to the xHCI spec, section 5.2.1, an xhc must only
- * have one 64-bit MMIO bar
- */
-int xhc_parse_mmio(void)
+int xhc_parse_bar(void)
 {
     unsigned int bar0 = xhc_read_reg(4);
     unsigned int bar1 = xhc_read_reg(5);
@@ -129,11 +125,83 @@ int xhc_parse_mmio(void)
     size = ~(size & 0xFFFFFFF0) + 1U;
     xhc_write_reg(4, bar0);
 
-    g_xhc.mmio_size = size;
-    g_xhc.mmio_phys = (bar0 & 0xFFFFFFF0) | ((unsigned long long)bar1 << 32);
+    g_xhc.mmio_len = size;
+    g_xhc.mmio_hpa = (bar0 & 0xFFFFFFF0) | ((unsigned long long)bar1 << 32);
 
-    printf("    - mmio size: 0x%llx\n", g_xhc.mmio_size);
-    printf("    - mmio phys: 0x%llx\n", g_xhc.mmio_phys);
+    printf("    - mmio len: 0x%llx\n", g_xhc.mmio_len);
+    printf("    - mmio hpa: 0x%llx\n", g_xhc.mmio_hpa);
 
     return 1;
+}
+
+int xhc_dump_hccparams1(void)
+{
+    if (!g_xhc.mmio) {
+        return 0;
+    }
+
+    unsigned int *cap1 = (unsigned int *)(g_xhc.mmio +
+                         offsetof(struct xhc_cap_regs, hccparams1));
+    printf("    - cap1: 0x%x\n", *cap1);
+
+    unsigned int xecp_offd = (*cap1 & 0xFFFF0000) >> 16;
+    unsigned int xecp_offb = xecp_offd << 2;
+    printf("    - xECP offsetd: 0x%x\n", xecp_offd);
+    printf("    - xECP phys: 0x%llx\n", g_xhc.mmio_hpa + xecp_offb);
+    printf("    - xECP virt: 0x%llx\n", g_xhc.mmio + xecp_offb);
+
+    unsigned int *xcap = g_xhc.mmio + xecp_offb;
+    unsigned int i = 0, next = 0;
+    do {
+        printf("    - xcap[%d]: 0x%x\n", i++, *xcap);
+        next = ((*xcap & 0xFF00) >> 8);
+        xcap += next;
+    } while (next);
+
+    return 1;
+}
+
+/**
+ * The first register of the debug capability (xdc) is found by traversing the
+ * xHCI capability list (xcap) until a capability with ID = 0xA is found.
+ *
+ * The xHCI capability list (xcap) begins at address
+ * mmio + (HCCPARAMS1[31:16] << 2)
+ */
+unsigned int *xhc_find_xdc_regs(void)
+{
+    if (!g_xhc.mmio) {
+        return (unsigned int *)0;
+    }
+
+    unsigned int *hccp1 = (unsigned int *)(g_xhc.mmio +
+                          offsetof(struct xhc_cap_regs, hccparams1));
+    /**
+     * Paranoid check against a zero value. The spec mandates that
+     * at least one "supported protocol" capability must be implemented,
+     * so this should always be false.
+     */
+    if ((*hccp1 & 0xFFFF0000) == 0) {
+        return (unsigned int *)0;
+    }
+
+    unsigned int *xcap = g_xhc.mmio + (((*hccp1 & 0xFFFF0000) >> 16) << 2);
+    unsigned int next = (*xcap & 0xFF00) >> 8;
+    unsigned int id = *xcap & 0xFF;
+
+    /**
+     * Table 7-1 of the xHCI spec states that 'next' is relative
+     * to the current value of xcap and is a dword offset.
+     */
+    while (id != 0x0A && next) {
+        xcap += next;
+        id = *xcap & 0xFF;
+        next = (*xcap & 0xFF00) >> 8;
+    }
+
+    if (id != 0x0A) {
+        return (unsigned int *)0;
+    }
+
+    return xcap;
 }
