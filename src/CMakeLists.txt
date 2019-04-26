@@ -22,3 +22,9 @@
 add_library(xue)
 target_sources(xue PRIVATE xhc.c portio.asm)
 target_include_directories(xue PRIVATE ${PROJECT_SOURCE_DIR}/include)
+
+if(PREFIX STREQUAL "vmm")
+    target_link_libraries(xue PUBLIC vmm::bfroot)
+    install(TARGETS xue DESTINATION lib EXPORT bfvmm-vmm-targets)
+    install(DIRECTORY ${PROJECT_SOURCE_DIR}/include/ DESTINATION include/bfvmm/xue)
+endif()
