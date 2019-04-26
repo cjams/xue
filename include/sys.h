@@ -19,19 +19,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#ifndef XUE_H
-#define XUE_H
+#ifndef XUE_SYS_H
+#define XUE_SYS_H
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define XUE_PAGE_SIZE 0x1000
-#define XUE_MEM_UC 0
-#define XUE_MEM_WB 1
-#define XUE_INIT 1
-
-void xue_init(void);
+void *sys_map_hpa(unsigned long long hpa, unsigned int size, int flags);
 
 #ifdef __cplusplus
 }

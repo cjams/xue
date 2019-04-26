@@ -19,21 +19,19 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#ifndef XUE_H
-#define XUE_H
+/**
+ * bf_map_hpa
+ *
+ * Map in memory at the given physical address
+ *
+ * @param hpa the physical address to map
+ * @param size the number of bytes to map
+ * @param flags the memory type flags (see XUE_MEM_* values in mem.h)
+ * @return the virtual address used to access phys
+ */
+void *bf_map_hpa(unsigned long long hpa, unsigned int size, int flags);
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-#define XUE_PAGE_SIZE 0x1000
-#define XUE_MEM_UC 0
-#define XUE_MEM_WB 1
-#define XUE_INIT 1
-
-void xue_init(void);
-
-#ifdef __cplusplus
+void *sys_map_hpa(unsigned long long hpa, unsigned int size, int flags)
+{
+    return bf_map_hpa(hpa, size, flags);
 }
-#endif
-#endif
