@@ -19,14 +19,17 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#ifndef XUE_H
-#define XUE_H
+#include <stdint.h>
+#include <xue/xue.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+void _vmcall(uint64_t rax, uint64_t rbx, uint64_t rcx, uint64_t rdx);
 
-#ifdef __cplusplus
+static inline void test(uint64_t rax)
+{
+    _vmcall(rax, 0, 0, 0);
 }
-#endif
-#endif
+
+int main()
+{
+    test(TEST_XHC_INIT);
+}

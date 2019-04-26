@@ -30,8 +30,11 @@ if(NOT PREFIX)
     set(CMAKE_C_STANDARD 11)
     set(CMAKE_C_EXTENSIONS OFF)
 
-    add_subdirectory(src)
-    add_subdirectory(test)
+    add_executable(xud xud.c vmcall.asm)
+    target_include_directories(xud PRIVATE include)
+
+    #    add_subdirectory(src)
+    #    add_subdirectory(test)
 else()
     add_subdirectory(src)
     #add_subdirectory(test)
