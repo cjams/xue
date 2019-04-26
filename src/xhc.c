@@ -69,8 +69,12 @@ static int matches_xhc(unsigned int cf8)
         return 0;
     }
 
-    if (pci_hdr_type(cf8) != pci_hdr_normal) {
-        return 0;
+    switch (pci_hdr_type(cf8)) {
+        case pci_hdr_normal:
+        case pci_hdr_normal_multi:
+            break;
+        default:
+            return 0;
     }
 
     return (cf8_read_reg(cf8, 2) >> 8) == XHC_CLASSC;
@@ -90,13 +94,13 @@ int xhc_find(void)
 
             if (matches_xhc(cf8)) {
                 g_xhc.cf8 = bdf_to_cf8(0, d, f);
-                printf("Located xHC device at %02x:%02x.%02x\n");
+                printf("Located xHC device at %02x:%02x.%02x\n", 0, d, f);
                 return 1;
             }
         }
     }
 
-    printf("ERROR: Failed to locate xHC on bus 0");
+    printf("ERROR: Failed to locate xHC on bus 0\n");
     return 0;
 }
 
@@ -108,6 +112,8 @@ int xhc_parse_mmio()
 {
     unsigned int bar0 = xhc_read_reg(4);
     unsigned int bar1 = xhc_read_reg(5);
+
+    printf("xhc_parse_mmio\n");
 
     /* IO bars not allowed */
     if ((bar0 & 0x1) != 0) {
@@ -128,11 +134,15 @@ int xhc_parse_mmio()
     g_xhc.mmio_size = size;
     g_xhc.mmio_phys = (bar0 & 0xFFFFFFF0) | ((unsigned long long)bar1 << 32);
 
+    printf("    - mmio size: 0x%llx\n", g_xhc.mmio_size);
+    printf("    - mmio phys: 0x%llx\n", g_xhc.mmio_phys);
+
     return 1;
 }
 
-void xhc_init(void)
+void xue_init(void)
 {
+    printf("xue_init\n");
     if (!xhc_find()) {
         return;
     }
