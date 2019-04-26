@@ -19,46 +19,31 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <sys.h>
-#include <xdc.h>
-#include <xhc.h>
-#include <xue/xue.h>
+#ifndef XUE_XDC_H
+#define XUE_XDC_H
 
-static void *xue_map_hpa(unsigned long long hpa,
-                         unsigned int len,
-                         int flags)
-{
-    if (!hpa || hpa & (XUE_PAGE_SIZE - 1)) {
-        return (void *)0;
-    }
+#pragma pack(push, 1)
 
-    if (!len || len & (XUE_PAGE_SIZE - 1)) {
-        return (void *)0;
-    }
+struct xdc_regs {
+    unsigned int id;             // base + 0x0
+    unsigned int db;             // base + 0x4
+    unsigned int erstsz;         // base + 0x8
+    unsigned int rsvdz;
+    unsigned long long erstba;   // base + 0x10
+    unsigned long long erdp;     // base + 0x18
+    unsigned int ctrl;           // base + 0x20
+    unsigned int st;             // base + 0x24
+    unsigned int portsc;         // base + 0x28
+    unsigned int rsvdp;
+    unsigned long long cp;       // base + 0x30
+    unsigned int ddi1;           // base + 0x38
+    unsigned int ddi2;           // base + 0x3C
+};
 
-    return sys_map_hpa(hpa, len, flags);
-}
+extern struct xdc {
+    struct xdc_regs *regs;
+} g_xdc;
 
-void xue_init(void)
-{
-    if (!xhc_find()) {
-        return;
-    }
+#pragma pack(pop)
 
-    if (!xhc_parse_bar()) {
-        return;
-    }
-
-    /* Can't dereference until we're sure we're in VMM context */
-    char *virt = (char *)xue_map_hpa(g_xhc.mmio_hpa,
-                                     g_xhc.mmio_len,
-                                     XUE_MEM_UC);
-    if (!virt) {
-        return;
-    }
-
-    g_xhc.mmio = virt;
-    xhc_dump_hccparams1();
-
-    g_xdc.regs = xhc_find_xdc_regs();
-}
+#endif
