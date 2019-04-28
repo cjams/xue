@@ -8,8 +8,8 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 //
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 //
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -66,8 +66,7 @@ static inline unsigned int cf8_read_reg(unsigned int cf8, unsigned int reg)
     return xue_ind(0xCFC);
 }
 
-static inline void cf8_write_reg(unsigned int cf8,
-                                 unsigned int reg,
+static inline void cf8_write_reg(unsigned int cf8, unsigned int reg,
                                  unsigned int val)
 {
     const unsigned int addr = (cf8 & 0xFFFFFF03UL) | (reg << 2);
@@ -75,8 +74,7 @@ static inline void cf8_write_reg(unsigned int cf8,
     xue_outd(0xCFC, val);
 }
 
-static inline unsigned int bdf_to_cf8(unsigned int b,
-                                      unsigned int d,
+static inline unsigned int bdf_to_cf8(unsigned int b, unsigned int d,
                                       unsigned int f)
 {
     return (1UL << 31) | (b << 16) | (d << 11) | (f << 8);

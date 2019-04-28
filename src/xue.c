@@ -8,8 +8,8 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 //
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 //
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -24,9 +24,7 @@
 #include <xhc.h>
 #include <xue/xue.h>
 
-static void *xue_map_hpa(unsigned long long hpa,
-                         unsigned int len,
-                         int flags)
+static void *xue_map_hpa(unsigned long long hpa, unsigned int len, int flags)
 {
     if (!hpa || hpa & (XUE_PAGE_SIZE - 1)) {
         return (void *)0;
@@ -50,9 +48,8 @@ void xue_init(void)
     }
 
     /* Can't dereference until we're sure we're in VMM context */
-    char *virt = (char *)xue_map_hpa(g_xhc.mmio_hpa,
-                                     g_xhc.mmio_len,
-                                     XUE_MEM_UC);
+    char *virt
+        = (char *)xue_map_hpa(g_xhc.mmio_hpa, g_xhc.mmio_len, XUE_MEM_UC);
     if (!virt) {
         return;
     }

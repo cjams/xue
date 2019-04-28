@@ -1,0 +1,11 @@
+AlignAfterOpenBracket: Align
+AlignEscapedNewlines: Right
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+BasedOnStyle: Webkit
+ColumnLimit: 80
+IncludeBlocks: Preserve
+PointerAlignment: Right
+ReflowComments: true
+SortIncludes: true

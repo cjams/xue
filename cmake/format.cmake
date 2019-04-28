@@ -19,22 +19,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-cmake_minimum_required(VERSION 3.14)
-project(xue)
-
-enable_language(ASM_NASM)
-
-set(BUILD_SHARED_LIBS OFF)
-set(CMAKE_C_STANDARD 11)
-set(CMAKE_C_EXTENSIONS OFF)
-set(CMAKE_DIR ${PROJECT_SOURCE_DIR}/cmake)
-set(SCRIPT_DIR ${PROJECT_SOURCE_DIR}/scripts)
-
-include(ProcessorCount)
-include(cmake/format.cmake)
-
-add_executable(xud xud.c vmcall.asm)
-target_include_directories(xud PRIVATE include)
-
-#    add_subdirectory(src)
-#    add_subdirectory(test)
+find_program(FORMAT NAMES clang-format REQUIRED)
+add_custom_target(format COMMAND
+    ${PROJECT_SOURCE_DIR}/scripts/format.sh ${PROJECT_SOURCE_DIR} ${FORMAT})

@@ -8,8 +8,8 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 //
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 //
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -19,9 +19,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include <pci.h>
 #include <stddef.h>
 #include <stdio.h>
-#include <pci.h>
 #include <xhc.h>
 
 /**
@@ -43,13 +43,13 @@
 #define XHC_CLASSC 0x000C0330
 
 enum {
-    pci_hdr_normal               = 0x00,
-    pci_hdr_pci_bridge           = 0x01,
-    pci_hdr_cardbus_bridge       = 0x02,
-    pci_hdr_normal_multi         = 0x80 | pci_hdr_normal,
-    pci_hdr_pci_bridge_multi     = 0x80 | pci_hdr_pci_bridge,
+    pci_hdr_normal = 0x00,
+    pci_hdr_pci_bridge = 0x01,
+    pci_hdr_cardbus_bridge = 0x02,
+    pci_hdr_normal_multi = 0x80 | pci_hdr_normal,
+    pci_hdr_pci_bridge_multi = 0x80 | pci_hdr_pci_bridge,
     pci_hdr_cardbus_bridge_multi = 0x80 | pci_hdr_cardbus_bridge,
-    pci_hdr_nonexistant          = 0xFF
+    pci_hdr_nonexistant = 0xFF
 };
 
 /* xhc device */
@@ -76,11 +76,11 @@ static int xhc_matches(unsigned int cf8)
     }
 
     switch (pci_hdr_type(cf8)) {
-        case pci_hdr_normal:
-        case pci_hdr_normal_multi:
-            break;
-        default:
-            return 0;
+    case pci_hdr_normal:
+    case pci_hdr_normal_multi:
+        break;
+    default:
+        return 0;
     }
 
     return (cf8_read_reg(cf8, 2) >> 8) == XHC_CLASSC;
@@ -140,8 +140,9 @@ int xhc_dump_hccparams1(void)
         return 0;
     }
 
-    unsigned int *cap1 = (unsigned int *)(g_xhc.mmio +
-                         offsetof(struct xhc_cap_regs, hccparams1));
+    unsigned int *cap1
+        = (unsigned int *)(g_xhc.mmio
+                           + offsetof(struct xhc_cap_regs, hccparams1));
     printf("    - cap1: 0x%x\n", *cap1);
 
     unsigned int xecp_offd = (*cap1 & 0xFFFF0000) >> 16;
@@ -174,8 +175,9 @@ unsigned int *xhc_find_xdc_regs(void)
         return (unsigned int *)0;
     }
 
-    unsigned int *hccp1 = (unsigned int *)(g_xhc.mmio +
-                          offsetof(struct xhc_cap_regs, hccparams1));
+    unsigned int *hccp1
+        = (unsigned int *)(g_xhc.mmio
+                           + offsetof(struct xhc_cap_regs, hccparams1));
     /**
      * Paranoid check against a zero value. The spec mandates that
      * at least one "supported protocol" capability must be implemented,

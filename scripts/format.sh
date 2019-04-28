@@ -1,3 +1,4 @@
+#!/bin/bash -e
 #
 # Copyright (C) 2019 Assured Information Security, Inc.
 #
@@ -19,22 +20,12 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-cmake_minimum_required(VERSION 3.14)
-project(xue)
+# $1 == PROJECT_SOURCE_DIR
+# $2 == clang-format binary
 
-enable_language(ASM_NASM)
+pushd $1
 
-set(BUILD_SHARED_LIBS OFF)
-set(CMAKE_C_STANDARD 11)
-set(CMAKE_C_EXTENSIONS OFF)
-set(CMAKE_DIR ${PROJECT_SOURCE_DIR}/cmake)
-set(SCRIPT_DIR ${PROJECT_SOURCE_DIR}/scripts)
+find . -name "*.c" -exec $2 -style=file -i '{}' \+
+find . -name "*.h" -exec $2 -style=file -i '{}' \+
 
-include(ProcessorCount)
-include(cmake/format.cmake)
-
-add_executable(xud xud.c vmcall.asm)
-target_include_directories(xud PRIVATE include)
-
-#    add_subdirectory(src)
-#    add_subdirectory(test)
+popd
