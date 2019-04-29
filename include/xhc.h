@@ -42,7 +42,7 @@ extern struct xhc {
     unsigned long long mmio_hpa;
 
     /* The virtual address of the device's MMIO space */
-    unsigned char *mmio;
+    char *mmio;
 } g_xhc;
 
 /**

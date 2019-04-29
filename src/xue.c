@@ -57,12 +57,12 @@ void xue_init(void)
     g_xhc.mmio = virt;
     xhc_dump_xcap_list();
 
-    g_dbc.regs = xhc_find_dbc_base();
-    if (!g_dbc.regs) {
-        return;
-    }
-
-    dbc_dump_regs(g_dbc.regs);
-    g_dbc.erstmax = (g_dbc.regs->id & 0x1F0000) >> 16;
-    printf("erstmax: %u\n", g_dbc.erstmax);
+//    g_dbc.regs = xhc_find_dbc_base();
+//    if (!g_dbc.regs) {
+//        return;
+//    }
+//
+//    dbc_dump_regs(g_dbc.regs);
+//    g_dbc.erstmax = (g_dbc.regs->id & 0x1F0000) >> 16;
+//    printf("erstmax: %u\n", g_dbc.erstmax);
 }

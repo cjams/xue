@@ -20,10 +20,26 @@
 // SOFTWARE.
 
 #include <dbc.h>
+#include <erst.h>
 #include <stdio.h>
+#include <string.h>
+#include <sys.h>
+#include <trb.h>
+#include <xhc.h>
 
-/* Debug capability (dbc) device */
 struct dbc g_dbc;
+struct erst_segment g_erst[NR_SEGS];
+struct trb g_evtring[TRB_PER_SEG];
+
+static inline void* dbc_alloc(unsigned long long size)
+{
+    return sys_alloc_aligned(64, size);
+}
+
+static inline void dbc_free(void *ptr)
+{
+    sys_free(ptr);
+}
 
 void dbc_dump_regs(struct dbc_reg *reg)
 {
@@ -40,4 +56,30 @@ void dbc_dump_regs(struct dbc_reg *reg)
     printf("cp: 0x%llx\n", reg->cp);
     printf("ddi1: 0x%x\n", reg->ddi1);
     printf("ddi2: 0x%x\n", reg->ddi2);
+}
+
+int dbc_init(void)
+{
+    memset(&g_dbc, 0, sizeof(g_dbc));
+
+    struct dbc_reg *reg = xhc_find_dbc_base();
+    if (!reg) {
+        return 0;
+    }
+
+    g_dbc.regs = reg;
+
+    /*
+     * Initialize the ERST
+     *
+     * 1. init erst_segment (descriptor)
+     * 2. init erst_segment data (page of TRBs)
+     */
+
+    int erstmax = (reg->id & 0x1F0000) >> 16;
+    if (NR_SEGS > (1 << erstmax)) {
+        return 0;
+    }
+
+    return 0;
 }

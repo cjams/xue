@@ -151,19 +151,19 @@ int xhc_dump_xcap_list(void)
         return 0;
     }
 
-    unsigned int *cap1
-        = (unsigned int *)(g_xhc.mmio
-                           + offsetof(struct xhc_cap_regs, hccparams1));
+    int *cap1
+        = (int *)(g_xhc.mmio
+                  + offsetof(struct xhc_cap_regs, hccparams1));
     printf("    - cap1: 0x%x\n", *cap1);
 
-    unsigned int xecp_offd = (*cap1 & 0xFFFF0000) >> 16;
-    unsigned int xecp_offb = xecp_offd << 2;
+    int xecp_offd = (*cap1 & 0xFFFF0000) >> 16;
+    int xecp_offb = xecp_offd << 2;
     printf("    - xECP offsetd: 0x%x\n", xecp_offd);
     printf("    - xECP phys: 0x%llx\n", g_xhc.mmio_hpa + xecp_offb);
-    printf("    - xECP virt: 0x%llx\n", g_xhc.mmio + xecp_offb);
+    printf("    - xECP virt: 0x%llx\n", (long long)(g_xhc.mmio + xecp_offb));
 
-    unsigned int *xcap = g_xhc.mmio + xecp_offb;
-    unsigned int i = 0, next = 0;
+    int *xcap = (int *)(g_xhc.mmio + xecp_offb);
+    int i = 0, next = 0;
     do {
         if ((*xcap & 0xFF) == 0xA) {
             printf("    - xcap[%d]: 0x%x (DbC)\n", i++, *xcap);
@@ -190,9 +190,9 @@ struct dbc_reg *xhc_find_dbc_base(void)
         return (struct dbc_reg *)0;
     }
 
-    unsigned int *hccp1
-        = (struct dbc_reg *)(g_xhc.mmio
-                             + offsetof(struct xhc_cap_regs, hccparams1));
+    int *hccp1
+        = (int *)(g_xhc.mmio
+                  + offsetof(struct xhc_cap_regs, hccparams1));
     /**
      * Paranoid check against a zero value. The spec mandates that
      * at least one "supported protocol" capability must be implemented,
@@ -202,9 +202,9 @@ struct dbc_reg *xhc_find_dbc_base(void)
         return (struct dbc_reg *)0;
     }
 
-    unsigned int *xcap = g_xhc.mmio + (((*hccp1 & 0xFFFF0000) >> 16) << 2);
-    unsigned int next = (*xcap & 0xFF00) >> 8;
-    unsigned int id = *xcap & 0xFF;
+    int *xcap = (int *)(g_xhc.mmio + (((*hccp1 & 0xFFFF0000) >> 16) << 2));
+    int next = (*xcap & 0xFF00) >> 8;
+    int id = *xcap & 0xFF;
 
     /**
      * Table 7-1 of the xHCI spec states that 'next' is relative
