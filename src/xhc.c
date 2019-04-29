@@ -179,7 +179,7 @@ int xhc_dump_hccparams1(void)
  * The xHCI capability list (xcap) begins at address
  * mmio + (HCCPARAMS1[31:16] << 2)
  */
-unsigned int *xhc_find_xdc_regs(void)
+unsigned int *xhc_find_xdc_base(void)
 {
     if (!g_xhc.mmio) {
         return (unsigned int *)0;

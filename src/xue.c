@@ -57,5 +57,5 @@ void xue_init(void)
     g_xhc.mmio = virt;
     xhc_dump_hccparams1();
 
-    g_xdc.regs = xhc_find_xdc_regs();
+    g_xdc.regs = xhc_find_xdc_base();
 }

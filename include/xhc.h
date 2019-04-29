@@ -102,6 +102,6 @@ int xhc_dump_hccparams1(void);
  *
  * @return the base address of the xdc registers, if found. NULL otherwise.
  */
-unsigned int *xhc_find_xdc_regs(void);
+unsigned int *xhc_find_xdc_base(void);
 
 #endif
