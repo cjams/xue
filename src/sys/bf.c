@@ -19,6 +19,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include <stdlib.h>
+
 /**
  * bf_map_hpa
  *
@@ -34,4 +36,14 @@ void *bf_map_hpa(unsigned long long hpa, unsigned int size, int flags);
 void *sys_map_hpa(unsigned long long hpa, unsigned int size, int flags)
 {
     return bf_map_hpa(hpa, size, flags);
+}
+
+void *sys_alloc_aligned(unsigned long long align, unsigned long long size)
+{
+    return aligned_alloc(align, size);
+}
+
+void sys_free(void *ptr)
+{
+    free(ptr);
 }

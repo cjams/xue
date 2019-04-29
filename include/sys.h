@@ -27,6 +27,8 @@ extern "C" {
 #endif
 
 void *sys_map_hpa(unsigned long long hpa, unsigned int size, int flags);
+void *sys_alloc_aligned(unsigned long long align, unsigned long long size);
+void sys_free(void *ptr);
 
 #ifdef __cplusplus
 }
