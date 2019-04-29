@@ -19,31 +19,65 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#ifndef XUE_XDC_H
-#define XUE_XDC_H
+#ifndef XUE_DBC_H
+#define XUE_DBC_H
 
 #pragma pack(push, 1)
 
-struct xdc_regs {
+/**
+ * struct dbc_reg
+ *
+ * The register layout of the Debug Capability Structure as
+ * defined in section 7.6.8.
+ */
+struct dbc_reg {
+    /* xHCI capability ID (0xA) */
     unsigned int id; // base + 0x0
+
+    /* Doorbell */
     unsigned int db; // base + 0x4
-    unsigned int erstsz; // base + 0x8
-    unsigned int rsvdz;
+
+    /* The number of entries in the event ring segment table (ERST) */
+    unsigned int erstsz; /* base + 0x8 */
+
+    /* Reserved 0 */
+    unsigned int rsvdz; /* base + 0xC */
+
+    /* Base address of the ERST */
     unsigned long long erstba; // base + 0x10
+
+    /* ERST dequeue pointer */
     unsigned long long erdp; // base + 0x18
+
+    /* Control */
     unsigned int ctrl; // base + 0x20
+
+    /* Status */
     unsigned int st; // base + 0x24
+
+    /* Port status and control */
     unsigned int portsc; // base + 0x28
+
+    /* Reserved/preserved */
     unsigned int rsvdp;
+
+    /* Context pointer */
     unsigned long long cp; // base + 0x30
+
+    /* Device descriptor info 1 */
     unsigned int ddi1; // base + 0x38
+
+    /* Device descriptor info 2 */
     unsigned int ddi2; // base + 0x3C
 };
 
-extern struct xdc {
-    struct xdc_regs *regs;
-} g_xdc;
+extern struct dbc {
+    struct dbc_reg *regs;
+    unsigned int erstmax;
+} g_dbc;
 
 #pragma pack(pop)
+
+void dbc_dump_regs(struct dbc_reg *reg);
 
 #endif

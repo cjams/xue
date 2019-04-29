@@ -19,7 +19,25 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <xdc.h>
+#include <dbc.h>
+#include <stdio.h>
 
-/* Debug capability (xdc) device */
-struct xdc g_xdc;
+/* Debug capability (dbc) device */
+struct dbc g_dbc;
+
+void dbc_dump_regs(struct dbc_reg *reg)
+{
+    printf("DbC registers:\n");
+
+    printf("id: 0x%x\n", reg->id);
+    printf("db: 0x%x\n", reg->db);
+    printf("erstsz: 0x%x\n", reg->erstsz);
+    printf("erstba: 0x%llx\n", reg->erstba);
+    printf("erdp: 0x%llx\n", reg->erdp);
+    printf("ctrl: 0x%x\n", reg->ctrl);
+    printf("st: 0x%x\n", reg->st);
+    printf("portsc: 0x%x\n", reg->portsc);
+    printf("cp: 0x%llx\n", reg->cp);
+    printf("ddi1: 0x%x\n", reg->ddi1);
+    printf("ddi2: 0x%x\n", reg->ddi2);
+}

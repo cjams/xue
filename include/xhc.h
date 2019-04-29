@@ -22,6 +22,8 @@
 #ifndef XUE_XHC_H
 #define XUE_XHC_H
 
+struct dbc_reg;
+
 /**
  * Common defines and interfaces for an xhc - eXtensible Host Controller
  */
@@ -71,7 +73,7 @@ struct xhc_cap_regs {
  *
  * @return 1 on success, 0 otherwise
  */
-int xhc_find(void);
+int find_xhc(void);
 
 /**
  * xhc_parse_bar
@@ -84,24 +86,24 @@ int xhc_find(void);
 int xhc_parse_bar(void);
 
 /**
- * xhc_dump_hccparams1
+ * xhc_dump_xcap_list
  *
- * Print the controller's HCCPARAMS1 capability register
+ * Print the controller's xHCI extended capability list
  *
  * @return 1 on success, 0 otherwise
  */
-int xhc_dump_hccparams1(void);
+int xhc_dump_xcap_list(void);
 
 /**
- * The first register of the debug capability (xdc) is found by traversing the
+ * The first register of the debug capability (dbc) is found by traversing the
  * host controller's capability list (xcap) until a capability
  * with ID = 0xA is found.
  *
  * The xHCI capability list (xcap) begins at address
  * mmio + (HCCPARAMS1[31:16] << 2)
  *
- * @return the base address of the xdc registers, if found. NULL otherwise.
+ * @return the base address of the dbc registers, if found. NULL otherwise.
  */
-unsigned int *xhc_find_xdc_base(void);
+struct dbc_reg *xhc_find_dbc_base(void);
 
 #endif

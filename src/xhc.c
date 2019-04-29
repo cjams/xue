@@ -19,6 +19,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include <dbc.h>
 #include <pci.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -67,7 +68,7 @@ static inline void xhc_write_reg(unsigned int reg, unsigned int val)
     cf8_write_reg(g_xhc.cf8, reg, val);
 }
 
-static int xhc_matches(unsigned int cf8)
+static int match_xhc(unsigned int cf8)
 {
     if (!cf8_exists(cf8)) {
         return 0;
@@ -78,11 +79,11 @@ static int xhc_matches(unsigned int cf8)
     case (XHC_DEV_CANLK << 16) | XHC_VENDOR:
         break;
     default: {
-            auto ven = (cf8_read_reg(cf8, 0) & 0x0000FFFF);
-            auto dev = (cf8_read_reg(cf8, 0) & 0xFFFF0000) >> 16;
-            printf("Unknown xHC PCI dev:ven (0x%x:0x%x)\n", dev, ven);
-            return 0;
-        }
+        int ven = (cf8_read_reg(cf8, 0) & 0x0000FFFF);
+        int dev = (cf8_read_reg(cf8, 0) & 0xFFFF0000) >> 16;
+        printf("Unknown xHC PCI dev:ven (0x%x:0x%x)\n", dev, ven);
+        return 0;
+    }
     }
 
     switch (pci_hdr_type(cf8)) {
@@ -96,13 +97,13 @@ static int xhc_matches(unsigned int cf8)
     return (cf8_read_reg(cf8, 2) >> 8) == XHC_CLASSC;
 }
 
-int xhc_find(void)
+int find_xhc(void)
 {
     for (int d = 0; d < NR_DEV; d++) {
         for (int f = 0; f < NR_FUN; f++) {
             unsigned int cf8 = bdf_to_cf8(0, d, f);
 
-            if (xhc_matches(cf8)) {
+            if (match_xhc(cf8)) {
                 g_xhc.cf8 = bdf_to_cf8(0, d, f);
                 printf("Located xHC device at %02x:%02x.%02x\n", 0, d, f);
                 return 1;
@@ -144,7 +145,7 @@ int xhc_parse_bar(void)
     return 1;
 }
 
-int xhc_dump_hccparams1(void)
+int xhc_dump_xcap_list(void)
 {
     if (!g_xhc.mmio) {
         return 0;
@@ -164,7 +165,11 @@ int xhc_dump_hccparams1(void)
     unsigned int *xcap = g_xhc.mmio + xecp_offb;
     unsigned int i = 0, next = 0;
     do {
-        printf("    - xcap[%d]: 0x%x\n", i++, *xcap);
+        if ((*xcap & 0xFF) == 0xA) {
+            printf("    - xcap[%d]: 0x%x (DbC)\n", i++, *xcap);
+        } else {
+            printf("    - xcap[%d]: 0x%x\n", i++, *xcap);
+        }
         next = ((*xcap & 0xFF00) >> 8);
         xcap += next;
     } while (next);
@@ -179,22 +184,22 @@ int xhc_dump_hccparams1(void)
  * The xHCI capability list (xcap) begins at address
  * mmio + (HCCPARAMS1[31:16] << 2)
  */
-unsigned int *xhc_find_xdc_base(void)
+struct dbc_reg *xhc_find_dbc_base(void)
 {
     if (!g_xhc.mmio) {
-        return (unsigned int *)0;
+        return (struct dbc_reg *)0;
     }
 
     unsigned int *hccp1
-        = (unsigned int *)(g_xhc.mmio
-                           + offsetof(struct xhc_cap_regs, hccparams1));
+        = (struct dbc_reg *)(g_xhc.mmio
+                             + offsetof(struct xhc_cap_regs, hccparams1));
     /**
      * Paranoid check against a zero value. The spec mandates that
      * at least one "supported protocol" capability must be implemented,
      * so this should always be false.
      */
     if ((*hccp1 & 0xFFFF0000) == 0) {
-        return (unsigned int *)0;
+        return (struct dbc_reg *)0;
     }
 
     unsigned int *xcap = g_xhc.mmio + (((*hccp1 & 0xFFFF0000) >> 16) << 2);
@@ -212,8 +217,8 @@ unsigned int *xhc_find_xdc_base(void)
     }
 
     if (id != 0x0A) {
-        return (unsigned int *)0;
+        return (struct dbc_reg *)0;
     }
 
-    return xcap;
+    return (struct dbc_reg *)xcap;
 }

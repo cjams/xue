@@ -19,8 +19,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include <dbc.h>
 #include <sys.h>
-#include <xdc.h>
 #include <xhc.h>
 #include <xue/xue.h>
 
@@ -39,7 +39,7 @@ static void *xue_map_hpa(unsigned long long hpa, unsigned int len, int flags)
 
 void xue_init(void)
 {
-    if (!xhc_find()) {
+    if (!find_xhc()) {
         return;
     }
 
@@ -55,7 +55,14 @@ void xue_init(void)
     }
 
     g_xhc.mmio = virt;
-    xhc_dump_hccparams1();
+    xhc_dump_xcap_list();
 
-    g_xdc.regs = xhc_find_xdc_base();
+    g_dbc.regs = xhc_find_dbc_base();
+    if (!g_dbc.regs) {
+        return;
+    }
+
+    dbc_dump_regs(g_dbc.regs);
+    g_dbc.erstmax = (g_dbc.regs->id & 0x1F0000) >> 16;
+    printf("erstmax: %u\n", g_dbc.erstmax);
 }
