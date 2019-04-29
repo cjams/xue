@@ -39,7 +39,9 @@
 #define NR_DEV 32
 #define NR_FUN 8
 
-#define XHC_DEVVEN 0xA2AF8086
+#define XHC_VENDOR 0x8086
+#define XHC_DEV_SKYLK 0xA2AF
+#define XHC_DEV_CANLK 0xA36D
 #define XHC_CLASSC 0x000C0330
 
 enum {
@@ -71,8 +73,16 @@ static int xhc_matches(unsigned int cf8)
         return 0;
     }
 
-    if (cf8_read_reg(cf8, 0) != XHC_DEVVEN) {
-        return 0;
+    switch (cf8_read_reg(cf8, 0)) {
+    case (XHC_DEV_SKYLK << 16) | XHC_VENDOR:
+    case (XHC_DEV_CANLK << 16) | XHC_VENDOR:
+        break;
+    default: {
+            auto ven = (cf8_read_reg(cf8, 0) & 0x0000FFFF);
+            auto dev = (cf8_read_reg(cf8, 0) & 0xFFFF0000) >> 16;
+            printf("Unknown xHC PCI dev:ven (0x%x:0x%x)\n", dev, ven);
+            return 0;
+        }
     }
 
     switch (pci_hdr_type(cf8)) {
