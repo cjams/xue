@@ -29,7 +29,7 @@ extern "C" {
 void *sys_map_hpa(unsigned long long hpa, unsigned int size, int flags);
 void *sys_alloc_aligned(unsigned long long align, unsigned long long size);
 void sys_free(void *ptr);
-unsigned long long sys_virt_to_phys(void *virt);
+unsigned long long sys_virt_to_phys(const void *virt);
 
 #ifdef __cplusplus
 }

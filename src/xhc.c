@@ -151,9 +151,7 @@ int xhc_dump_xcap_list(void)
         return 0;
     }
 
-    int *cap1
-        = (int *)(g_xhc.mmio
-                  + offsetof(struct xhc_cap_regs, hccparams1));
+    int *cap1 = (int *)(g_xhc.mmio + offsetof(struct xhc_cap_regs, hccparams1));
     printf("    - cap1: 0x%x\n", *cap1);
 
     int xecp_offd = (*cap1 & 0xFFFF0000) >> 16;
@@ -191,8 +189,7 @@ struct dbc_reg *xhc_find_dbc_base(void)
     }
 
     int *hccp1
-        = (int *)(g_xhc.mmio
-                  + offsetof(struct xhc_cap_regs, hccparams1));
+        = (int *)(g_xhc.mmio + offsetof(struct xhc_cap_regs, hccparams1));
     /**
      * Paranoid check against a zero value. The spec mandates that
      * at least one "supported protocol" capability must be implemented,

@@ -91,7 +91,7 @@ static inline void set_ep_type(unsigned int *ep, unsigned int type)
  *
  */
 static inline void init_endpoint(unsigned int *ep, unsigned int mbs,
-    unsigned int type, unsigned long long tr_phys)
+                                 unsigned int type, unsigned long long tr_phys)
 {
     memset(ep, 0, DBC_CTX_SIZE);
 
@@ -109,7 +109,7 @@ static inline void init_endpoint(unsigned int *ep, unsigned int mbs,
     ep[2] = tr_phys & 0xFFFFFFFF;
     ep[3] = tr_phys >> 32;
 
-    //TODO: avg trb length
+    // TODO: avg trb length
 }
 
 #endif

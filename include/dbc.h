@@ -29,7 +29,7 @@
 #pragma pack(push, 1)
 
 struct dbc_ctx {
-    /* TODO: Info context defined in section 7.6.9.1 */
+    /* Info context defined in section 7.6.9.1 */
     unsigned int info[DBC_CTX_DWORDS];
 
     /* OUT bulk transfer ring */
@@ -100,6 +100,10 @@ struct dbc {
     struct trb *iring;
 };
 
+int dbc_init(void);
+void dbc_enable(void);
+int dbc_enabled(void);
+void dbc_disable(void);
 void dbc_dump_regs(struct dbc_reg *reg);
 
 #endif

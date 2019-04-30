@@ -20,6 +20,7 @@
 // SOFTWARE.
 
 #include <dbc.h>
+#include <stdio.h>
 #include <sys.h>
 #include <xhc.h>
 #include <xue/xue.h>
@@ -56,4 +57,10 @@ void xue_init(void)
 
     g_xhc.mmio = virt;
     xhc_dump_xcap_list();
+
+    if (!dbc_init()) {
+        printf("dbc_init failed!\n");
+    }
+
+    dbc_enable();
 }
