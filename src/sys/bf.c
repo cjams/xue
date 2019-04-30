@@ -28,14 +28,29 @@
  *
  * @param hpa the physical address to map
  * @param size the number of bytes to map
- * @param flags the memory type flags (see XUE_MEM_* values in mem.h)
+ * @param flags the memory type flags (see XUE_MEM_* values in xue.h)
  * @return the virtual address used to access phys
  */
 void *bf_map_hpa(unsigned long long hpa, unsigned int size, int flags);
 
+/**
+ * bf_virt_to_phys
+ *
+ * Translate the given virtual address to its corresponding physical address.
+ *
+ * @param virt the virtual address to translate
+ * @return the resulting physical address
+ */
+unsigned long long bf_virt_to_phys(unsigned long long virt);
+
 void *sys_map_hpa(unsigned long long hpa, unsigned int size, int flags)
 {
     return bf_map_hpa(hpa, size, flags);
+}
+
+unsigned long long sys_virt_to_phys(unsigned long long virt)
+{
+    return bf_virt_to_phys(virt);
 }
 
 void *sys_alloc_aligned(unsigned long long align, unsigned long long size)

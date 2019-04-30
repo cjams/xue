@@ -23,7 +23,21 @@
 #ifndef XUE_DBC_H
 #define XUE_DBC_H
 
+#define DBC_CTX_DWORDS 16
+#define DBC_CTX_SIZE (DBC_CTX_DWORDS * sizeof(unsigned int))
+
 #pragma pack(push, 1)
+
+struct dbc_ctx {
+    /* TODO: Info context defined in section 7.6.9.1 */
+    unsigned int info[DBC_CTX_DWORDS];
+
+    /* OUT bulk transfer ring */
+    unsigned int ep_out[DBC_CTX_DWORDS];
+
+    /* IN bulk transfer ring */
+    unsigned int ep_in[DBC_CTX_DWORDS];
+};
 
 /**
  * struct dbc_reg
@@ -74,12 +88,17 @@ struct dbc_reg {
 
 #pragma pack(pop)
 
+struct erst_segment;
 struct trb;
 
-extern struct dbc {
+struct dbc {
     struct dbc_reg *regs;
-    struct trb *evtring;
-} g_dbc;
+    struct dbc_ctx *ctx;
+    struct erst_segment *erst;
+    struct trb *ering;
+    struct trb *oring;
+    struct trb *iring;
+};
 
 void dbc_dump_regs(struct dbc_reg *reg);
 

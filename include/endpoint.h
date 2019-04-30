@@ -20,24 +20,11 @@
  * SOFTWARE.
  */
 
-#ifndef XUE_EP_H
-#define XUE_EP_H
+#ifndef XUE_ENDPOINT_H
+#define XUE_ENDPOINT_H
 
+#include <dbc.h>
 #include <string.h>
-
-#pragma pack(push, 1)
-
-/**
- * struct dbc_endpoint
- *
- * Describes a DbC endpoint context.
- * All DbC endpoint contexts are 64 bytes
- */
-struct dbc_endpoint {
-    unsigned int data[16];
-};
-
-#pragma pack(pop)
 
 /* Enpoint states */
 enum ep_state_t {
@@ -63,28 +50,26 @@ enum ep_type_t {
     intr_in
 };
 
-/**
- * ep_state
- */
-static inline unsigned int ep_state(struct dbc_endpoint *ep)
+static inline unsigned int ep_state(unsigned int *ep)
 {
-    return ep->data[0] & 0x7;
-}
-static inline void set_ep_state(struct dbc_endpoint *ep, unsigned int state)
-{
-    ep->data[0] |= state;
+    return ep[0] & 0x7;
 }
 
-/**
- * ep_type
- */
-static inline unsigned int ep_type(struct dbc_endpoint *ep)
+static inline void set_ep_state(unsigned int *ep, unsigned int state)
 {
-    return (ep->data[1] & 0x38) >> 3;
+    ep[0] &= ~0x7UL;
+    ep[0] |= state;
 }
-static inline void set_ep_type(struct dbc_endpoint *ep, unsigned int type)
+
+static inline unsigned int ep_type(unsigned int *ep)
 {
-    ep->data[1] |= (type << 3);
+    return (ep[1] & 0x38) >> 3;
+}
+
+static inline void set_ep_type(unsigned int *ep, unsigned int type)
+{
+    ep[1] &= ~0x38UL;
+    ep[1] |= (type << 3);
 }
 
 /**
@@ -101,28 +86,30 @@ static inline void set_ep_type(struct dbc_endpoint *ep, unsigned int type)
  * Max packet size: 1024
  * Max burst size: debug max burst size (in ctrl register)
  * EP type: 2 for OUT bulk, 6 for IN bulk
- * TR dequeue ptr: hpa of transfer ring
+ * TR dequeue ptr: phys addr of transfer ring
  * Avg TRB length: software defined (see section 4.14.1.1)
  *
  */
-static inline void init_endpoint(struct dbc_endpoint *ep, unsigned int type)
+static inline void init_endpoint(unsigned int *ep, unsigned int mbs,
+    unsigned int type, unsigned long long tr_phys)
 {
-    memset(ep, 0, sizeof(*ep));
+    memset(ep, 0, DBC_CTX_SIZE);
 
     set_ep_state(ep, disabled);
     set_ep_type(ep, type);
 
     /* Max packet size */
     const unsigned int mps = 1024;
-    ep->data[1] |= (mps << 16);
+    ep[1] |= (mps << 16);
 
     /* Max burst size */
-    const unsigned int mbs = (g_dbc.regs->ctrl & 0xFF0000) >> 16;
-    ep->data[1] |= (mbs << 8);
+    ep[1] |= (mbs << 8);
 
-    //TODO: tr dequeue ptr, avg trb length
+    /* TR dequeue pointer */
+    ep[2] = tr_phys & 0xFFFFFFFF;
+    ep[3] = tr_phys >> 32;
 
+    //TODO: avg trb length
 }
-
 
 #endif

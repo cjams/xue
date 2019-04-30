@@ -28,17 +28,14 @@
 #pragma pack(push, 1)
 
 /**
- * struct erst_entry
+ * struct erst_segment
  *
  * The ERST segment below is defined in section 6.5. This
- * structure is used by both software and the xHC hardware.
+ * structure is accessed by both software and the xHC hardware.
  */
 struct erst_segment {
-    /* Ring segment base address lo. Bits [5:0] must be 0. */
-    unsigned int rsba_lo;
-
-    /* Ring segment base address hi. */
-    unsigned int rsba_hi;
+    /* Base address. Bits [5:0] must be 0. */
+    unsigned long long base;
 
     /*
      * Ring segment size defines the number of TRBs supported by
@@ -56,16 +53,5 @@ struct erst_segment {
 #define SEG_SIZE 4096
 #define TRB_SIZE sizeof(struct trb)
 #define TRB_PER_SEG (SEG_SIZE / TRB_SIZE)
-
-/**
- * ERST
- *
- * The event ring segment table contains event ring segment descriptors
- * Each descriptor contains the address and size (in TRBs) of the segment.
- *
- * The number of entries must be at most 2^erstmax.
- */
-extern struct erst_segment g_erst[NR_SEGS];
-extern struct trb g_evtring[TRB_PER_SEG];
 
 #endif

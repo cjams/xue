@@ -20,6 +20,7 @@
 // SOFTWARE.
 
 #include <dbc.h>
+#include <endpoint.h>
 #include <erst.h>
 #include <stdio.h>
 #include <string.h>
@@ -27,9 +28,15 @@
 #include <trb.h>
 #include <xhc.h>
 
-struct dbc g_dbc;
-struct erst_segment g_erst[NR_SEGS];
-struct trb g_evtring[TRB_PER_SEG];
+#define __cachealign __attribute__((aligned(64)))
+
+static struct dbc g_dbc __cachealign;
+static struct dbc_ctx g_ctx __cachealign;
+static struct erst_segment g_erst[NR_SEGS] __cachealign;
+
+static struct trb g_ering[TRB_PER_SEG];
+static struct trb g_oring[TRB_PER_SEG];
+static struct trb g_iring[TRB_PER_SEG];
 
 static inline void* dbc_alloc(unsigned long long size)
 {
@@ -58,28 +65,61 @@ void dbc_dump_regs(struct dbc_reg *reg)
     printf("ddi2: 0x%x\n", reg->ddi2);
 }
 
+/* See section 7.6.4.1 for explanation of the initialization sequence */
 int dbc_init(void)
 {
     memset(&g_dbc, 0, sizeof(g_dbc));
 
+    /* Registers */
     struct dbc_reg *reg = xhc_find_dbc_base();
     if (!reg) {
         return 0;
     }
-
-    g_dbc.regs = reg;
-
-    /*
-     * Initialize the ERST
-     *
-     * 1. init erst_segment (descriptor)
-     * 2. init erst_segment data (page of TRBs)
-     */
 
     int erstmax = (reg->id & 0x1F0000) >> 16;
     if (NR_SEGS > (1 << erstmax)) {
         return 0;
     }
 
-    return 0;
+    g_dbc.regs = reg;
+
+    /* Event ring */
+    memset(&g_ering, 0, sizeof(g_ering));
+    g_dbc.ering = g_ering;
+
+    /* Event ring segment table */
+    memset(&g_erst, 0, sizeof(g_erst));
+    unsigned long long base = sys_virt_to_phys(g_ering);
+    if (!base) {
+        return 0;
+    }
+
+    g_erst[0].base = base;
+    g_erst[0].nr_trb = TRB_PER_SEG;
+    g_dbc.erst = g_erst;
+
+    /* Endpoint context */
+    memset(&g_ctx, 0, sizeof(g_ctx));
+
+    unsigned int max_burst = (reg->ctrl & 0xFF0000) >> 16;
+    unsigned long long out = sys_virt_to_phys(g_oring);
+    unsigned long long in = sys_virt_to_phys(g_iring);
+
+    init_endpoint(g_ctx.ep_out, max_burst, bulk_out, out);
+    init_endpoint(g_ctx.ep_in, max_burst, bulk_in, in);
+
+    g_dbc.ctx = &g_ctx;
+    g_dbc.oring = g_oring;
+    g_dbc.iring = g_iring;
+
+    /* Hardware registers */
+    reg->erstsz = NR_SEGS;
+    reg->erstba = sys_virt_to_phys(g_erst);
+    reg->erdp = base;
+    reg->cp = sys_virt_to_phys(&g_ctx);
+
+    /* Geeeet it on */
+    //reg->ctrl |= (1UL << 31);
+
+    return 1;
 }
