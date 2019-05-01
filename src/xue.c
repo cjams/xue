@@ -90,3 +90,8 @@ void xue_dump(void)
 {
     dbc_dump();
 }
+
+void xue_write(const char *data, unsigned int size)
+{
+    dbc_write(data, size);
+}

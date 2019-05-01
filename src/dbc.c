@@ -172,7 +172,7 @@ int dbc_init()
     return 1;
 }
 
-int dbc_enabled()
+int dbc_is_enabled()
 {
     return g_dbc.regs->ctrl & (1UL << 31);
 }
@@ -187,9 +187,60 @@ void dbc_disable()
     g_dbc.regs->ctrl &= ~(1UL << 31);
 }
 
+int dbc_state()
+{
+    const struct dbc_reg *regs = g_dbc.regs;
+    if (!regs) {
+        return dbc_off;
+    }
+
+    unsigned int ctrl = regs->ctrl;
+    unsigned int port = regs->portsc;
+
+    if (ctrl & (1UL << CTRL_DCR_SHIFT)) {
+        return dbc_configured;
+    }
+
+    if (!(ctrl & (1UL << CTRL_DCE_SHIFT))) {
+        return dbc_off;
+    }
+
+    if (!(port & (1UL << PORTSC_CCS_SHIFT))) {
+        return dbc_disconnected;
+    }
+
+    if (port & (1UL << PORTSC_PR_SHIFT)) {
+        return dbc_resetting;
+    }
+
+    if (port & (1UL << PORTSC_PED_SHIFT)) {
+        int pls = (port & PORTSC_PLS_MASK) >> PORTSC_PLS_SHIFT;
+        if (pls == 6) {
+            /* PLS inactive */
+            return dbc_error;
+        } else {
+            /* PLS not inactive */
+            return dbc_enabled;
+        }
+    } else {
+        int pls = (port & PORTSC_PLS_MASK) >> PORTSC_PLS_SHIFT;
+        if (pls == 4) {
+            /* PLS disabled */
+            return dbc_disabled;
+        } else {
+            /* PLS not inactive */
+            return dbc_enabled;
+        }
+    }
+}
+
 void dbc_dump()
 {
     printf("ST: 0x%x\n", g_dbc.regs->st);
     printf("CTRL: 0x%x\n", g_dbc.regs->ctrl);
     printf("PORTSC: 0x%x\n", g_dbc.regs->portsc);
+}
+
+void dbc_write(const char *data, unsigned int size)
+{
 }
