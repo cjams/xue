@@ -80,3 +80,13 @@ void xue_init(void)
         printf("dbc_init failed!\n");
     }
 }
+
+void xue_disable(void)
+{
+    dbc_disable();
+}
+
+void xue_dump(void)
+{
+    dbc_dump();
+}

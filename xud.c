@@ -20,6 +20,8 @@
 // SOFTWARE.
 
 #include <stdint.h>
+#include <stdio.h>
+#include <string.h>
 #include <xue/xue.h>
 
 void _vmcall(uint64_t rax, uint64_t rbx, uint64_t rcx, uint64_t rdx);
@@ -29,7 +31,18 @@ static inline void test(uint64_t rax)
     _vmcall(rax, 0, 0, 0);
 }
 
-int main()
+int main(int argc, char **argv)
 {
-    test(XUE_INIT);
+    if (argc != 2) {
+        printf("ERROR: xud expects 1 arg\n");
+        return 22;
+    }
+
+    if (!strcmp("init", argv[1])) {
+        test(XUE_INIT);
+    } else if (!strcmp("disable", argv[1])) {
+        test(XUE_DISABLE);
+    } else if (!strcmp("dump", argv[1])) {
+        test(XUE_DUMP);
+    }
 }

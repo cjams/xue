@@ -33,8 +33,10 @@ set(SCRIPT_DIR ${PROJECT_SOURCE_DIR}/scripts)
 include(ProcessorCount)
 include(cmake/format.cmake)
 
-add_executable(xud xud.c vmcall.asm)
-target_include_directories(xud PRIVATE include)
+if(NOT PREFIX)
+    add_executable(xud xud.c vmcall.asm)
+    target_include_directories(xud PRIVATE include)
+endif()
 
 add_subdirectory(src)
 #    add_subdirectory(test)

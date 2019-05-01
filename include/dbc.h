@@ -100,11 +100,12 @@ struct dbc {
     struct trb *iring;
 };
 
-int dbc_init(void);
+int dbc_init();
+void dbc_dump();
 
-int dbc_enabled(unsigned int *ctrl);
-void dbc_enable(unsigned int *ctrl);
-void dbc_disable(unsigned int *ctrl);
+int dbc_enabled();
+void dbc_enable();
+void dbc_disable();
 
 void dbc_dump_regs(struct dbc_reg *reg);
 

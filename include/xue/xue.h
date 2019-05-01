@@ -29,9 +29,14 @@ extern "C" {
 #define XUE_PAGE_SIZE 0x1000
 #define XUE_MEM_UC 0
 #define XUE_MEM_WB 1
+
 #define XUE_INIT 1
+#define XUE_DISABLE 2
+#define XUE_DUMP 3
 
 void xue_init(void);
+void xue_disable(void);
+void xue_dump(void);
 
 #ifdef __cplusplus
 }

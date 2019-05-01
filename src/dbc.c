@@ -115,11 +115,6 @@ void dbc_dump_regs(struct dbc_reg *reg)
 /* See section 7.6.4.1 for explanation of the initialization sequence */
 int dbc_init()
 {
-    static int done = 0;
-    if (done) {
-        return 1;
-    }
-
     memset(&g_dbc, 0, sizeof(g_dbc));
 
     /* Registers */
@@ -173,25 +168,28 @@ int dbc_init()
     reg->erdp = base;
     reg->cp = sys_virt_to_phys(&g_ctx);
 
-    // dbc_dump_regs(reg);
-
-    dbc_enable(&reg->ctrl);
-    done = 1;
-
+    dbc_enable();
     return 1;
 }
 
-int dbc_enabled(unsigned int *ctrl)
+int dbc_enabled()
 {
-    return *ctrl & (1UL << 31);
+    return g_dbc.regs->ctrl & (1UL << 31);
 }
 
-void dbc_enable(unsigned int *ctrl)
+void dbc_enable()
 {
-    *ctrl |= (1UL << 31);
+    g_dbc.regs->ctrl |= (1UL << 31);
 }
 
-void dbc_disable(unsigned int *ctrl)
+void dbc_disable()
 {
-    *ctrl &= ~(1UL << 31);
+    g_dbc.regs->ctrl &= ~(1UL << 31);
+}
+
+void dbc_dump()
+{
+    printf("ST: 0x%x\n", g_dbc.regs->st);
+    printf("CTRL: 0x%x\n", g_dbc.regs->ctrl);
+    printf("PORTSC: 0x%x\n", g_dbc.regs->portsc);
 }
