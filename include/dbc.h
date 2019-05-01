@@ -101,9 +101,11 @@ struct dbc {
 };
 
 int dbc_init(void);
-void dbc_enable(void);
-int dbc_enabled(void);
-void dbc_disable(void);
+
+int dbc_enabled(unsigned int *ctrl);
+void dbc_enable(unsigned int *ctrl);
+void dbc_disable(unsigned int *ctrl);
+
 void dbc_dump_regs(struct dbc_reg *reg);
 
 #endif

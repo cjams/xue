@@ -38,29 +38,45 @@ static void *xue_map_hpa(unsigned long long hpa, unsigned int len, int flags)
     return sys_map_hpa(hpa, len, flags);
 }
 
-void xue_init(void)
+static int xhc_init(void)
 {
+    static int done = 0;
+
+    if (done) {
+        return 1;
+    }
+
     if (!find_xhc()) {
-        return;
+        return 0;
     }
 
     if (!xhc_parse_bar()) {
-        return;
+        return 0;
     }
 
     /* Can't dereference until we're sure we're in VMM context */
-    char *virt
+    char *mmio
         = (char *)xue_map_hpa(g_xhc.mmio_hpa, g_xhc.mmio_len, XUE_MEM_UC);
-    if (!virt) {
-        return;
+
+    if (!mmio) {
+        return 0;
     }
 
-    g_xhc.mmio = virt;
-    xhc_dump_xcap_list();
+    g_xhc.mmio = mmio;
+    // xhc_dump_xcap_list();
+    done = 1;
+
+    return 1;
+}
+
+void xue_init(void)
+{
+    if (!xhc_init()) {
+        printf("xhc_init failed!\n");
+        return;
+    }
 
     if (!dbc_init()) {
         printf("dbc_init failed!\n");
     }
-
-    dbc_enable();
 }

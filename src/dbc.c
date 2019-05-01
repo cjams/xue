@@ -35,6 +35,7 @@
  * Info context strings. Each string is UTF-16LE encoded
  */
 
+/* clang-format off */
 /* String 0 descriptor */
 #define STR0_LEN 6
 static const char str0[STR0_LEN] = {
@@ -61,6 +62,7 @@ static const char prod[PROD_LEN] = {
     'D', 0, 'b', 0, 'C', 0, ' ', 0,
     'D', 0, 'r', 0, 'i', 0, 'v', 0, 'e', 0, 'r', 0
 };
+/* clang-format on */
 
 static struct dbc g_dbc __cachealign;
 static struct dbc_ctx g_ctx __cachealign;
@@ -111,8 +113,13 @@ void dbc_dump_regs(struct dbc_reg *reg)
 }
 
 /* See section 7.6.4.1 for explanation of the initialization sequence */
-int dbc_init(void)
+int dbc_init()
 {
+    static int done = 0;
+    if (done) {
+        return 1;
+    }
+
     memset(&g_dbc, 0, sizeof(g_dbc));
 
     /* Registers */
@@ -120,17 +127,12 @@ int dbc_init(void)
     if (!reg) {
         return 0;
     }
-
-//    if (dbc_enabled()) {
-//        dbc_disable();
-//    }
+    g_dbc.regs = reg;
 
     int erstmax = (reg->id & 0x1F0000) >> 16;
     if (NR_SEGS > (1 << erstmax)) {
         return 0;
     }
-
-    g_dbc.regs = reg;
 
     /* TRB rings */
     memset(&g_ering, 0, sizeof(g_ering));
@@ -171,26 +173,25 @@ int dbc_init(void)
     reg->erdp = base;
     reg->cp = sys_virt_to_phys(&g_ctx);
 
-    dbc_dump_regs(reg);
+    // dbc_dump_regs(reg);
 
-    printf("    - g_ering: 0x%llx\n", (unsigned long long)g_ering);
-    printf("    - g_oring: 0x%llx\n", (unsigned long long)g_oring);
-    printf("    - g_iring: 0x%llx\n", (unsigned long long)g_iring);
+    dbc_enable(&reg->ctrl);
+    done = 1;
 
     return 1;
 }
 
-void dbc_enable(void)
+int dbc_enabled(unsigned int *ctrl)
 {
-    g_dbc.regs->ctrl |= (1UL << 31);
+    return *ctrl & (1UL << 31);
 }
 
-int dbc_enabled(void)
+void dbc_enable(unsigned int *ctrl)
 {
-    return g_dbc.regs->ctrl & (1UL << 31);
+    *ctrl |= (1UL << 31);
 }
 
-void dbc_disable(void)
+void dbc_disable(unsigned int *ctrl)
 {
-    g_dbc.regs->ctrl &= ~(1UL << 31);
+    *ctrl &= ~(1UL << 31);
 }
