@@ -44,5 +44,7 @@ int main(int argc, char **argv)
         test(XUE_DISABLE);
     } else if (!strcmp("dump", argv[1])) {
         test(XUE_DUMP);
+    } else if (!strcmp("write", argv[1])) {
+        test(XUE_WRITE);
     }
 }

@@ -23,6 +23,8 @@
 #ifndef XUE_TRB_H
 #define XUE_TRB_H
 
+#include <stdio.h>
+
 /**
  * Transfer request blocks (TRBs) are the basic blocks on which
  * all DbC (and xHC) transactions occur. Each TRB is 16 bytes,
@@ -44,6 +46,12 @@ struct trb {
 
 #pragma pack(pop)
 
+#define TRB_PER_PAGE (4096 / sizeof(struct trb))
+#define PAGE_PER_SEG 1
+
+/* Every ring is one segment i.e., one contiguous chunk of memory */
+#define SEG_PER_RING 1
+
 /* Fields common to every TRB (section 4.11.1) */
 
 static inline unsigned int trb_cycle(struct trb *trb)
@@ -51,34 +59,19 @@ static inline unsigned int trb_cycle(struct trb *trb)
     return trb->ctrl & 0x1;
 }
 
-static inline unsigned int trb_ent(struct trb *trb)
-{
-    return (trb->ctrl & 0x2) >> 1;
-}
-
 static inline unsigned int trb_type(struct trb *trb)
 {
     return (trb->ctrl & 0xFC00) >> 10;
 }
 
-static inline void trb_set_cyc(struct trb *trb)
+static inline void trb_set_cycle(struct trb *trb)
 {
     trb->ctrl |= 0x1;
 }
 
-static inline void trb_set_ent(struct trb *trb)
-{
-    trb->ctrl |= 0x2;
-}
-
-static inline void trb_clear_cyc(struct trb *trb)
+static inline void trb_clear_cycle(struct trb *trb)
 {
     trb->ctrl &= ~0x1UL;
-}
-
-static inline void trb_clear_ent(struct trb *trb)
-{
-    trb->ctrl &= ~0x2UL;
 }
 
 static inline void trb_set_type(struct trb *trb, unsigned int type)
@@ -255,6 +248,65 @@ static inline unsigned int trb_evt_endpoint_id(struct trb *trb)
 static inline unsigned int trb_evt_ed(struct trb *trb)
 {
     return (trb->ctrl & 0x4) >> 2;
+}
+
+/*
+ * Fields for link TRBs (section 6.4.4.1)
+ */
+
+static inline unsigned long long trb_link_rsp(struct trb *trb)
+{
+    return trb->params;
+}
+
+static inline unsigned int trb_link_tc(struct trb *trb)
+{
+    return (trb->ctrl & 0x2) >> 1;
+}
+
+static inline unsigned int trb_link_ch(struct trb *trb)
+{
+    return (trb->ctrl & 0x10) >> 4;
+}
+
+static inline unsigned int trb_link_ioc(struct trb *trb)
+{
+    return (trb->ctrl & 0x20) >> 5;
+}
+
+static inline void trb_link_set_rsp(struct trb *trb, unsigned long long rsp)
+{
+    trb->params = rsp;
+}
+
+static inline void trb_link_set_tc(struct trb *trb)
+{
+    trb->ctrl |= 0x2;
+}
+
+static inline void trb_link_clear_tc(struct trb *trb)
+{
+    trb->ctrl &= ~0x2UL;
+}
+
+static inline void trb_link_set_ch(struct trb *trb)
+{
+    trb->ctrl |= 0x10;
+}
+
+static inline void trb_link_clear_ch(struct trb *trb)
+{
+    trb->ctrl &= ~0x10UL;
+}
+
+static inline void trb_link_set_ioc(struct trb *trb)
+{
+    trb->ctrl |= 0x20;
+}
+
+static inline void trb_link_clear_ioc(struct trb *trb)
+{
+    trb->ctrl &= ~0x20UL;
 }
 
 #endif

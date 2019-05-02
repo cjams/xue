@@ -180,9 +180,9 @@ struct dbc {
     struct dbc_reg *regs;
     struct dbc_ctx *ctx;
     struct erst_segment *erst;
-    struct trb *ering;
-    struct trb *oring;
-    struct trb *iring;
+    struct trb_ring *ering;
+    struct trb_ring *oring;
+    struct trb_ring *iring;
 };
 
 int dbc_init();

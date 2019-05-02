@@ -26,6 +26,7 @@
 #include <string.h>
 #include <sys.h>
 #include <trb.h>
+#include <trb_ring.h>
 #include <xhc.h>
 
 #define __cachealign __attribute__((aligned(64)))
@@ -68,9 +69,13 @@ static struct dbc g_dbc __cachealign;
 static struct dbc_ctx g_ctx __cachealign;
 static struct erst_segment g_erst[NR_SEGS] __cachealign;
 
-static struct trb g_ering[TRB_PER_SEG] __pagealign;
-static struct trb g_oring[TRB_PER_SEG] __pagealign;
-static struct trb g_iring[TRB_PER_SEG] __pagealign;
+static struct trb g_etrb[TRB_PER_PAGE] __pagealign;
+static struct trb g_otrb[TRB_PER_PAGE] __pagealign;
+static struct trb g_itrb[TRB_PER_PAGE] __pagealign;
+
+static struct trb_ring g_ering;
+static struct trb_ring g_oring;
+static struct trb_ring g_iring;
 
 static inline void *dbc_alloc(unsigned long long size)
 {
@@ -130,31 +135,31 @@ int dbc_init()
     }
 
     /* TRB rings */
-    memset(&g_ering, 0, sizeof(g_ering));
-    memset(&g_oring, 0, sizeof(g_oring));
-    memset(&g_iring, 0, sizeof(g_iring));
+    init_consumer_ring(&g_ering, g_etrb);
+    init_producer_ring(&g_oring, g_otrb);
+    init_producer_ring(&g_iring, g_itrb);
 
-    g_dbc.ering = g_ering;
-    g_dbc.oring = g_oring;
-    g_dbc.iring = g_iring;
+    g_dbc.ering = &g_ering;
+    g_dbc.oring = &g_oring;
+    g_dbc.iring = &g_iring;
 
     /* Event ring segment table */
     memset(&g_erst, 0, sizeof(g_erst));
-    unsigned long long base = sys_virt_to_phys(g_ering);
-    if (!base) {
+    unsigned long long erdp = sys_virt_to_phys(g_ering.trb);
+    if (!erdp) {
         return 0;
     }
 
-    g_erst[0].base = base;
-    g_erst[0].nr_trb = TRB_PER_SEG;
+    g_erst[0].base = erdp;
+    g_erst[0].nr_trb = SEG_PER_RING * PAGE_PER_SEG * TRB_PER_PAGE;
     g_dbc.erst = g_erst;
 
     /* Info and endpoint context */
     memset(&g_ctx, 0, sizeof(g_ctx));
 
     unsigned int max_burst = (reg->ctrl & 0xFF0000) >> 16;
-    unsigned long long out = sys_virt_to_phys(g_oring);
-    unsigned long long in = sys_virt_to_phys(g_iring);
+    unsigned long long out = sys_virt_to_phys(g_oring.trb);
+    unsigned long long in = sys_virt_to_phys(g_iring.trb);
 
     init_endpoint(g_ctx.ep_out, max_burst, bulk_out, out);
     init_endpoint(g_ctx.ep_in, max_burst, bulk_in, in);
@@ -163,9 +168,9 @@ int dbc_init()
     g_dbc.ctx = &g_ctx;
 
     /* Hardware registers */
-    reg->erstsz = NR_SEGS;
+    reg->erstsz = SEG_PER_RING;
     reg->erstba = sys_virt_to_phys(g_erst);
-    reg->erdp = base;
+    reg->erdp = erdp;
     reg->cp = sys_virt_to_phys(&g_ctx);
 
     dbc_enable();
@@ -241,6 +246,20 @@ void dbc_dump()
     printf("PORTSC: 0x%x\n", g_dbc.regs->portsc);
 }
 
+struct trb *dbc_event()
+{
+    int erne = g_dbc.regs->st & (1UL << ST_ERNE_SHIFT);
+    if (erne) {
+        return g_dbc.ering->trb + g_dbc.ering->deq;
+    } else {
+        return NULL;
+    }
+}
+
 void dbc_write(const char *data, unsigned int size)
 {
+    struct trb *etrb = dbc_event();
+    if (etrb) {
+        trb_evt_dump(etrb);
+    }
 }
