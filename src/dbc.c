@@ -26,6 +26,9 @@
 #include <string.h>
 #include <sys.h>
 #include <trb.h>
+#include <trb_event.h>
+#include <trb_link.h>
+#include <trb_normal.h>
 #include <trb_ring.h>
 #include <xhc.h>
 
@@ -76,6 +79,27 @@ static struct trb g_itrb[TRB_PER_PAGE] __pagealign;
 static struct trb_ring g_ering;
 static struct trb_ring g_oring;
 static struct trb_ring g_iring;
+
+static void trb_dump(struct trb *trb)
+{
+    switch (trb_type(trb)) {
+    case 1:
+        trb_norm_dump(trb);
+        return;
+    case 6:
+        trb_link_dump(trb);
+        return;
+    case 32:
+        trb_te_dump(trb);
+        return;
+    case 34:
+        trb_psce_dump(trb);
+        return;
+    default:
+        printf("unknown TRB type: %d\n", trb_type(trb));
+        return;
+    }
+}
 
 static inline void *dbc_alloc(unsigned long long size)
 {
@@ -260,6 +284,6 @@ void dbc_write(const char *data, unsigned int size)
 {
     struct trb *etrb = dbc_event();
     if (etrb) {
-        trb_evt_dump(etrb);
+        trb_dump(etrb);
     }
 }

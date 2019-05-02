@@ -24,6 +24,7 @@
 #define XUE_TRB_RING_H
 
 #include <trb.h>
+#include <trb_link.h>
 
 /**
  * TRB rings are circular queues of TRBs shared between the xHC and the driver.
