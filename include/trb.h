@@ -52,6 +52,13 @@ struct trb {
 #define PAGE_PER_SEG 1
 #define SEG_PER_RING 1
 
+enum {
+    trb_type_norm = 1,
+    trb_type_link = 6,
+    trb_type_te = 32,
+    trb_type_psce = 34
+};
+
 /* Fields common to every TRB (section 4.11.1) */
 
 static inline unsigned int trb_cycle(struct trb *trb)

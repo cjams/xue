@@ -62,10 +62,10 @@ struct trb_ring {
     unsigned int deq;
 
     /* Producer cycle state - value written to cycle bit as a producer */
-    int pcs;
+    unsigned int pcs:1;
 
-    /* Consumer cycle state - value written to cycle bit as a consumer */
-    int ccs;
+    /* Consumer cycle state - value compared to the cycle bit as a consumer */
+    unsigned int ccs:1;
 };
 
 static inline int trb_ring_empty(struct trb_ring *ring)

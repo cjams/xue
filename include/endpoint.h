@@ -95,7 +95,6 @@ static inline void init_endpoint(unsigned int *ep, unsigned int mbs,
 {
     memset(ep, 0, DBC_CTX_SIZE);
 
-    set_ep_state(ep, disabled);
     set_ep_type(ep, type);
 
     /* Max packet size */
@@ -109,7 +108,11 @@ static inline void init_endpoint(unsigned int *ep, unsigned int mbs,
     ep[2] = tr_phys & 0xFFFFFFFF;
     ep[3] = tr_phys >> 32;
 
-    // TODO: avg trb length
+    /*
+     * Avg TRB length..the best value for this is workload dependent. See
+     * the implementation note in section 4.14.1.1 for details
+     */
+    ep[4] = 3 * 1024;
 }
 
 #endif

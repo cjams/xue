@@ -83,16 +83,16 @@ static struct trb_ring g_iring;
 static void trb_dump(struct trb *trb)
 {
     switch (trb_type(trb)) {
-    case 1:
+    case trb_type_norm:
         trb_norm_dump(trb);
         return;
-    case 6:
+    case trb_type_link:
         trb_link_dump(trb);
         return;
-    case 32:
+    case trb_type_te:
         trb_te_dump(trb);
         return;
-    case 34:
+    case trb_type_psce:
         trb_psce_dump(trb);
         return;
     default:
@@ -270,20 +270,94 @@ void dbc_dump()
     printf("PORTSC: 0x%x\n", g_dbc.regs->portsc);
 }
 
-struct trb *dbc_event()
+static void handle_psce(struct trb *trb)
 {
-    int erne = g_dbc.regs->st & (1UL << ST_ERNE_SHIFT);
-    if (erne) {
-        return g_dbc.ering->trb + g_dbc.ering->deq;
-    } else {
-        return NULL;
+    unsigned int *psc = &g_dbc.regs->portsc;
+    unsigned int mask = (1UL << PORTSC_CSC_SHIFT) |
+                        (1UL << PORTSC_PRC_SHIFT) |
+                        (1UL << PORTSC_PLC_SHIFT) |
+                        (1UL << PORTSC_CEC_SHIFT);
+
+    unsigned int ack = mask & *psc;
+    *psc |= ack;
+
+    if (ack != (1UL << PORTSC_CSC_SHIFT)) {
+        printf("WARNING: PRC, PLC, or CEC set in portsc ack: %x\n", ack);
     }
+}
+
+static void handle_event(struct trb_ring *er, struct trb *evt)
+{
+    switch (trb_type(evt)) {
+    case trb_type_te:
+        printf("Transfer events not yet handled: ");
+        trb_dump(evt);
+        return;
+    case trb_type_psce:
+        handle_psce(evt);
+        trb_dump(evt);
+        return;
+    default:
+        printf("ALERT: unhandled TRB event type: %d\n", trb_type(evt));
+        return;
+    }
+}
+
+static inline int own_event_trb(struct trb_ring *er, struct trb *evt)
+{
+    return trb_cycle(evt) == er->ccs;
+}
+
+static inline struct trb *next_event(struct trb_ring *er)
+{
+    er->ccs = (er->deq == er->size - 1) ? ~er->ccs : er->ccs;
+    er->deq = (er->deq + 1) & (er->size - 1);
+
+    return &er->trb[er->deq];
+}
+
+static void handle_events(struct dbc *dbc)
+{
+    const int erne = dbc->regs->st & (1UL << ST_ERNE_SHIFT);
+    if (!erne) {
+        return;
+    }
+
+    /* erne implies at least one consumable TRB on the event ring */
+    struct trb_ring *er = dbc->ering;
+    struct trb *evt = &er->trb[er->deq];
+
+    while (own_event_trb(er, evt)) {
+        handle_event(er, evt);
+        evt = next_event(er);
+    }
+
+    dbc->regs->erdp = sys_virt_to_phys(&er->trb[er->deq]);
 }
 
 void dbc_write(const char *data, unsigned int size)
 {
-    struct trb *etrb = dbc_event();
-    if (etrb) {
-        trb_dump(etrb);
+    handle_events(&g_dbc);
+
+    struct trb tfr;
+    memset(&tfr, 0, sizeof(tfr));
+
+    if (trb_ring_full(g_dbc.iring)) {
+        printf("WARNING: IN TRB ring is full\n");
     }
+
+    trb_norm_set_dbp(&tfr, sys_virt_to_phys(data));
+    trb_norm_set_tfrlen(&tfr, size);
+    trb_norm_set_ioc(&tfr);
+
+    trb_set_type(&tfr, trb_type_norm);
+    if (g_dbc.iring->pcs) {
+        trb_set_cycle(&tfr);
+    } else {
+        trb_clear_cycle(&tfr);
+    }
+
+    memcpy(&g_dbc.iring->trb[g_dbc.iring->enq], &tfr, sizeof(tfr));
+    g_dbc.iring->enq++;
+//    g_dbc.regs->db = 1;
 }
