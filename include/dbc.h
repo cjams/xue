@@ -188,6 +188,7 @@ struct dbc {
 int dbc_init();
 void dbc_dump();
 void dbc_write(const char *data, unsigned int size);
+void dbc_ack();
 
 int dbc_is_enabled();
 void dbc_enable();

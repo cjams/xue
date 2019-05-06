@@ -23,8 +23,6 @@
 #ifndef XUE_TRB_H
 #define XUE_TRB_H
 
-#include <stdio.h>
-
 /**
  * Transfer request blocks (TRBs) are the basic blocks on which
  * all DbC (and xHC) transactions occur. Each TRB is 16 bytes,
@@ -52,14 +50,39 @@ struct trb {
 #define PAGE_PER_SEG 1
 #define SEG_PER_RING 1
 
+/* Relevant TRB types */
 enum {
+    /* Normal */
     trb_type_norm = 1,
+
+    /* Link */
     trb_type_link = 6,
+
+    /* Transfer event */
     trb_type_te = 32,
+
+    /* Port status change event */
     trb_type_psce = 34
 };
 
-/* Fields common to every TRB (section 4.11.1) */
+/* Relevant TRB completion codes */
+enum {
+    trb_cc_success = 1,
+    trb_cc_trb_err = 5
+};
+
+static inline void trb_init(struct trb *trb)
+{
+    trb->params = 0;
+    trb->status = 0;
+    trb->ctrl = 0;
+}
+
+/*
+ * Fields common to every TRB (section 4.11.1). These are the fields
+ * defined in the TRB template, minus the ENT bit. That bit is the toggle
+ * cycle bit in link TRBs.
+ */
 
 static inline unsigned int trb_cycle(struct trb *trb)
 {
@@ -71,20 +94,16 @@ static inline unsigned int trb_type(struct trb *trb)
     return (trb->ctrl & 0xFC00) >> 10;
 }
 
-static inline void trb_set_cycle(struct trb *trb)
-{
-    trb->ctrl |= 0x1;
-}
-
-static inline void trb_clear_cycle(struct trb *trb)
+static inline void trb_set_cycle(struct trb *trb, unsigned int c)
 {
     trb->ctrl &= ~0x1UL;
+    trb->ctrl |= c;
 }
 
-static inline void trb_set_type(struct trb *trb, unsigned int type)
+static inline void trb_set_type(struct trb *trb, unsigned int t)
 {
     trb->ctrl &= ~0xFC00UL;
-    trb->ctrl |= (type << 10);
+    trb->ctrl |= (t << 10);
 }
 
 #endif

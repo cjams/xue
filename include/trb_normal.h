@@ -24,8 +24,9 @@
 #define XUE_TRB_NORMAL_H
 
 #include <trb.h>
+#include <stdio.h>
 
-static inline unsigned long long trb_norm_dbp(struct trb *trb)
+static inline unsigned long long trb_norm_buf(struct trb *trb)
 {
     return trb->params;
 }
@@ -40,7 +41,7 @@ static inline unsigned int trb_norm_tdsz(struct trb *trb)
     return (trb->status & 0x003E0000) >> 17;
 }
 
-static inline unsigned int trb_norm_tfrlen(struct trb *trb)
+static inline unsigned int trb_norm_len(struct trb *trb)
 {
     return (trb->status & 0x0001FFFF);
 }
@@ -80,7 +81,7 @@ static inline unsigned int trb_norm_ent(struct trb *trb)
     return (trb->ctrl & 0x2) >> 1;
 }
 
-static inline void trb_norm_set_dbp(struct trb *trb, unsigned long long addr)
+static inline void trb_norm_set_buf(struct trb *trb, unsigned long long addr)
 {
     trb->params = addr;
 }
@@ -97,7 +98,7 @@ static inline void trb_norm_set_tdsz(struct trb *trb, unsigned int size)
     trb->status |= (size << 17);
 }
 
-static inline void trb_norm_set_tfrlen(struct trb *trb, unsigned int len)
+static inline void trb_norm_set_len(struct trb *trb, unsigned int len)
 {
     trb->status &= ~0x1FFFFUL;
     trb->status |= len;
@@ -175,11 +176,11 @@ static inline void trb_norm_clear_ent(struct trb *trb)
 
 static inline void trb_norm_dump(struct trb *trb)
 {
-    printf("normal    trb: cycle: %d type: %d dbp: 0x%llx tgt: %u ",
-           trb_cycle(trb), trb_type(trb), trb_norm_dbp(trb),
+    printf("normal    trb: cycle: %d type: %d buf: 0x%llx tgt: %u ",
+           trb_cycle(trb), trb_type(trb), trb_norm_buf(trb),
            trb_norm_inttgt(trb));
-    printf("tdsz: %u tfrlen: %u bei: %u idt: %u ioc: %u ch: %u ns: %u ",
-           trb_norm_tdsz(trb), trb_norm_tfrlen(trb), trb_norm_bei(trb),
+    printf("tdsz: %u len: %u bei: %u idt: %u ioc: %u ch: %u ns: %u ",
+           trb_norm_tdsz(trb), trb_norm_len(trb), trb_norm_bei(trb),
            trb_norm_idt(trb), trb_norm_ioc(trb), trb_norm_ch(trb),
            trb_norm_ns(trb));
     printf("isp: %u ent: %u\n", trb_norm_isp(trb), trb_norm_ent(trb));

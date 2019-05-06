@@ -61,61 +61,52 @@ struct trb_ring {
     /* The offset of the dequeue pointer from the base address */
     unsigned int deq;
 
-    /* Producer cycle state - value written to cycle bit as a producer */
-    unsigned int pcs : 1;
-
-    /* Consumer cycle state - value compared to the cycle bit as a consumer */
-    unsigned int ccs : 1;
+    /* Cycle state toggled on each ring wrap-around */
+    unsigned int cycle;
 };
+
+/**
+ * trb_ring_init
+ *
+ * Initialize an empty TRB ring. If producer != 0, then a
+ * link TRB will be created at the end of the ring.
+ *
+ * @param ring the ring to initialize
+ * @param trbs the array of TRBs
+ * @param producer nonzero if transfer ring, 0 otherwise
+ */
+void trb_ring_init(struct trb_ring *ring, struct trb *trbs, int producer);
+
+/**
+ * trb_ring_enqueue
+ *
+ * Push a new work item on the transfer ring. This is undefined for event rings
+ * since they are read-only. The provided ring must not be full.
+ *
+ * @param ring the ring to enqueue
+ * @param buf the virtual address of the data to transfer
+ * @param len the number of bytes to transfer
+ */
+void trb_ring_enqueue(struct trb_ring *ring, const char *buf, unsigned int len);
+
+static inline void init_producer_ring(struct trb_ring *ring, struct trb *trb)
+{
+    trb_ring_init(ring, trb, 1);
+}
+
+static inline void init_consumer_ring(struct trb_ring *ring, struct trb *trb)
+{
+    trb_ring_init(ring, trb, 0);
+}
 
 static inline int trb_ring_empty(struct trb_ring *ring)
 {
     return ring->enq == ring->deq;
 }
 
-/* This assumes that each ring has only one segment */
 static inline int trb_ring_full(struct trb_ring *ring)
 {
     return ((ring->enq + 1) & (ring->size - 1)) == ring->deq;
-}
-
-static inline void init_trb_ring(struct trb_ring *ring, struct trb *trb,
-                                 int producer)
-{
-    ring->size = SEG_PER_RING * PAGE_PER_SEG * TRB_PER_PAGE;
-
-    memset(trb, 0, ring->size);
-
-    ring->trb = trb;
-    ring->enq = 0;
-    ring->deq = 0;
-
-    if (producer) {
-        ring->pcs = 1;
-        ring->ccs = -1;
-
-        /*
-         * Producer implies transfer ring, so we have to place a
-         * link TRB at the end
-         */
-        struct trb *link = &trb[ring->size - 1];
-        trb_link_set_rsp(link, sys_virt_to_phys(trb));
-        trb_link_set_tc(link);
-
-    } else {
-        ring->pcs = -1;
-        ring->ccs = 1;
-    }
-}
-
-static inline void init_producer_ring(struct trb_ring *ring, struct trb *trb)
-{
-    init_trb_ring(ring, trb, 1);
-}
-
-static inline void init_consumer_ring(struct trb_ring *ring, struct trb *trb)
-{
-    init_trb_ring(ring, trb, 0);
 }
 
 #endif

@@ -1,23 +1,24 @@
-//
-// Copyright (C) 2019 Assured Information Security, Inc.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in
-// all copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+/*
+ * Copyright (C) 2019 Assured Information Security, Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
 
 #include <dbc.h>
 #include <endpoint.h>
@@ -36,12 +37,12 @@
 #define __pagealign __attribute__((aligned(4096)))
 
 /**
- * These values are used so that the xhci_dbc host driver
- * binds to the DbC at enumeration time
+ * These values are used so that the xhci_dbc linux host
+ * driver binds to the DbC at enumeration time
  */
-#define XUE_VENDOR 0x1d6b
-#define XUE_PRODUCT 0x0010
-#define XUE_PROTOCOL 0x0000
+#define DBC_VENDOR 0x1d6b
+#define DBC_PRODUCT 0x0010
+#define DBC_PROTOCOL 0x0000
 
 /**
  * Info context strings. Each string is UTF-16LE encoded
@@ -67,9 +68,9 @@ static const char mfr[MFR_LEN] = {
 };
 
 /* Product string descriptor */
-#define PROD_LEN 32
-static const char prod[PROD_LEN] = {
-    PROD_LEN,
+#define PRD_LEN 32
+static const char prd[PRD_LEN] = {
+    PRD_LEN,
     3,
     'x', 0, 'H', 0, 'C', 0, 'I', 0, ' ', 0,
     'D', 0, 'b', 0, 'C', 0, ' ', 0,
@@ -119,16 +120,6 @@ static void trb_dump(struct trb *trb)
     }
 }
 
-static inline void *dbc_alloc(unsigned long long size)
-{
-    return sys_alloc_aligned(64, size);
-}
-
-static inline void dbc_free(void *ptr)
-{
-    sys_free(ptr);
-}
-
 static void init_info(unsigned int *info)
 {
     unsigned long long *sda = (unsigned long long *)info;
@@ -138,10 +129,10 @@ static void init_info(unsigned int *info)
 
     *sda = sys_virt_to_phys(str0);
     *mfa = sys_virt_to_phys(mfr);
-    *pfa = sys_virt_to_phys(prod);
+    *pfa = sys_virt_to_phys(prd);
     *sea = sys_virt_to_phys(ser);
 
-    info[8] = (SER_LEN << 24) | (PROD_LEN << 16) | (MFR_LEN << 8) | STR0_LEN;
+    info[8] = (SER_LEN << 24) | (PRD_LEN << 16) | (MFR_LEN << 8) | STR0_LEN;
 }
 
 void dbc_dump_regs(struct dbc_reg *reg)
@@ -195,7 +186,7 @@ int dbc_init()
     }
 
     g_erst[0].base = erdp;
-    g_erst[0].nr_trb = SEG_PER_RING * PAGE_PER_SEG * TRB_PER_PAGE;
+    g_erst[0].nr_trb = PAGE_PER_SEG * TRB_PER_PAGE;
     g_dbc.erst = g_erst;
 
     /* Info and endpoint context */
@@ -216,8 +207,8 @@ int dbc_init()
     reg->erstba = sys_virt_to_phys(g_erst);
     reg->erdp = erdp;
     reg->cp = sys_virt_to_phys(&g_ctx);
-    reg->ddi1 = (XUE_VENDOR << 16) | XUE_PROTOCOL;
-    reg->ddi2 = XUE_PRODUCT;
+    reg->ddi1 = (DBC_VENDOR << 16) | DBC_PROTOCOL;
+    reg->ddi2 = DBC_PRODUCT;
 
     dbc_enable();
     return 1;
@@ -292,6 +283,7 @@ void dbc_dump()
     printf("PORTSC: 0x%x\n", g_dbc.regs->portsc);
 }
 
+// TODO
 static void handle_psce(struct trb *trb)
 {
     unsigned int *psc = &g_dbc.regs->portsc;
@@ -302,10 +294,27 @@ static void handle_psce(struct trb *trb)
     *psc |= ack;
 }
 
-static void handle_event(struct trb_ring *er, struct trb *evt)
+static void handle_te(struct trb_ring *tr, struct trb *trb)
+{
+    unsigned int cc = trb_te_code(trb);
+
+    if (cc != trb_cc_success) {
+        printf("ERROR: transfer completion code: %d\n", cc);
+        return;
+    }
+
+    /*
+     * Update the *transfer* deq with the TRB offset. This assumes
+     * each segment is one page
+     */
+    tr->deq = (trb_te_ptr(trb) & 0xFFF) >> 4;
+}
+
+static void handle_event(struct trb_ring *tfr, struct trb *evt)
 {
     switch (trb_type(evt)) {
     case trb_type_te:
+        handle_te(tfr, evt);
         trb_dump(evt);
         return;
     case trb_type_psce:
@@ -320,12 +329,12 @@ static void handle_event(struct trb_ring *er, struct trb *evt)
 
 static inline int own_event_trb(struct trb_ring *er, struct trb *evt)
 {
-    return trb_cycle(evt) == er->ccs;
+    return trb_cycle(evt) == er->cycle;
 }
 
 static inline struct trb *next_event(struct trb_ring *er)
 {
-    er->ccs = (er->deq == er->size - 1) ? ~er->ccs : er->ccs;
+    er->cycle = (er->deq == er->size - 1) ? er->cycle ^ 1 : er->cycle;
     er->deq = (er->deq + 1) & (er->size - 1);
 
     return &er->trb[er->deq];
@@ -333,20 +342,16 @@ static inline struct trb *next_event(struct trb_ring *er)
 
 static void handle_events(struct dbc *dbc)
 {
-    const int erne = dbc->regs->st & (1UL << ST_ERNE_SHIFT);
-    if (!erne) {
-        return;
-    }
-
-    /* erne implies at least one consumable TRB on the event ring */
     struct trb_ring *er = dbc->ering;
+    struct trb_ring *tr = dbc->oring;
     struct trb *evt = &er->trb[er->deq];
 
     while (own_event_trb(er, evt)) {
-        handle_event(er, evt);
+        handle_event(tr, evt);
         evt = next_event(er);
     }
 
+    /* TODO: pretranslate */
     dbc->regs->erdp = sys_virt_to_phys(&er->trb[er->deq]);
 }
 
@@ -357,31 +362,13 @@ void dbc_ack()
 
 void dbc_write(const char *data, unsigned int size)
 {
-    struct trb ntrb;
-    struct trb_ring *oring;
-
     handle_events(&g_dbc);
 
-    oring = g_dbc.oring;
+    struct trb_ring *oring = g_dbc.oring;
     if (trb_ring_full(oring)) {
         printf("ALERT: OUT ring is full\n");
     }
 
-    memset(&ntrb, 0, sizeof(ntrb));
-
-    trb_set_type(&ntrb, trb_type_norm);
-    if (oring->pcs) {
-        trb_set_cycle(&ntrb);
-    } else {
-        trb_clear_cycle(&ntrb);
-    }
-
-    trb_norm_set_dbp(&ntrb, sys_virt_to_phys(data));
-    trb_norm_set_tfrlen(&ntrb, size);
-    trb_norm_set_ioc(&ntrb);
-
-    memcpy(&oring->trb[oring->enq], &ntrb, sizeof(ntrb));
-    // FIXME
-    oring->enq++;
+    trb_ring_enqueue(oring, data, size);
     g_dbc.regs->db &= 0xFFFF00FF;
 }
