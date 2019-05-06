@@ -36,11 +36,20 @@
 #define __pagealign __attribute__((aligned(4096)))
 
 /**
+ * These values are used so that the xhci_dbc host driver
+ * binds to the DbC at enumeration time
+ */
+#define XUE_VENDOR 0x1d6b
+#define XUE_PRODUCT 0x0010
+#define XUE_PROTOCOL 0x0000
+
+/**
  * Info context strings. Each string is UTF-16LE encoded
  */
 
 /* clang-format off */
-/* String 0 descriptor */
+
+/* String 0 descriptor. Only one LANGID is allowed */
 #define STR0_LEN 6
 static const char str0[STR0_LEN] = {
     STR0_LEN, /* bLength */
@@ -52,20 +61,29 @@ static const char str0[STR0_LEN] = {
 /* Manufacturer string descriptor */
 #define MFR_LEN 8
 static const char mfr[MFR_LEN] = {
-    MFR_LEN, /* bLength */
-    3,       /* bDescriptorType */
+    MFR_LEN,
+    3,
     'A', 0, 'I', 0, 'S', 0
 };
 
 /* Product string descriptor */
 #define PROD_LEN 32
 static const char prod[PROD_LEN] = {
-    PROD_LEN, /* bLength */
-    3,        /* bDescriptorType */
+    PROD_LEN,
+    3,
     'x', 0, 'H', 0, 'C', 0, 'I', 0, ' ', 0,
     'D', 0, 'b', 0, 'C', 0, ' ', 0,
     'D', 0, 'r', 0, 'i', 0, 'v', 0, 'e', 0, 'r', 0
 };
+
+/* Serial string descriptor */
+#define SER_LEN 4
+static const char ser[SER_LEN] = {
+    SER_LEN,
+    3,
+    '0', 0
+};
+
 /* clang-format on */
 
 static struct dbc g_dbc __cachealign;
@@ -116,12 +134,14 @@ static void init_info(unsigned int *info)
     unsigned long long *sda = (unsigned long long *)info;
     unsigned long long *mfa = (unsigned long long *)(&info[2]);
     unsigned long long *pfa = (unsigned long long *)(&info[4]);
+    unsigned long long *sea = (unsigned long long *)(&info[6]);
 
     *sda = sys_virt_to_phys(str0);
     *mfa = sys_virt_to_phys(mfr);
     *pfa = sys_virt_to_phys(prod);
+    *sea = sys_virt_to_phys(ser);
 
-    info[8] = (PROD_LEN << 16) | (MFR_LEN << 8) | STR0_LEN;
+    info[8] = (SER_LEN << 24) | (PROD_LEN << 16) | (MFR_LEN << 8) | STR0_LEN;
 }
 
 void dbc_dump_regs(struct dbc_reg *reg)
@@ -196,6 +216,8 @@ int dbc_init()
     reg->erstba = sys_virt_to_phys(g_erst);
     reg->erdp = erdp;
     reg->cp = sys_virt_to_phys(&g_ctx);
+    reg->ddi1 = (XUE_VENDOR << 16) | XUE_PROTOCOL;
+    reg->ddi2 = XUE_PRODUCT;
 
     dbc_enable();
     return 1;
@@ -265,8 +287,8 @@ int dbc_state()
 
 void dbc_dump()
 {
-    printf("ST: 0x%x\n", g_dbc.regs->st);
-    printf("CTRL: 0x%x\n", g_dbc.regs->ctrl);
+    printf("ST:     0x%x\n", g_dbc.regs->st);
+    printf("CTRL:   0x%x\n", g_dbc.regs->ctrl);
     printf("PORTSC: 0x%x\n", g_dbc.regs->portsc);
 }
 
@@ -280,17 +302,12 @@ static void handle_psce(struct trb *trb)
 
     unsigned int ack = mask & *psc;
     *psc |= ack;
-
-    if (ack != (1UL << PORTSC_CSC_SHIFT)) {
-        printf("WARNING: PRC, PLC, or CEC set in portsc ack: %x\n", ack);
-    }
 }
 
 static void handle_event(struct trb_ring *er, struct trb *evt)
 {
     switch (trb_type(evt)) {
     case trb_type_te:
-        printf("Transfer events not yet handled: ");
         trb_dump(evt);
         return;
     case trb_type_psce:
@@ -342,8 +359,8 @@ void dbc_write(const char *data, unsigned int size)
     struct trb tfr;
     memset(&tfr, 0, sizeof(tfr));
 
-    if (trb_ring_full(g_dbc.iring)) {
-        printf("WARNING: IN TRB ring is full\n");
+    if (trb_ring_full(g_dbc.oring)) {
+        printf("WARNING: OUT TRB ring is full\n");
     }
 
     trb_norm_set_dbp(&tfr, sys_virt_to_phys(data));
@@ -351,13 +368,13 @@ void dbc_write(const char *data, unsigned int size)
     trb_norm_set_ioc(&tfr);
 
     trb_set_type(&tfr, trb_type_norm);
-    if (g_dbc.iring->pcs) {
+    if (g_dbc.oring->pcs) {
         trb_set_cycle(&tfr);
     } else {
         trb_clear_cycle(&tfr);
     }
 
-    memcpy(&g_dbc.iring->trb[g_dbc.iring->enq], &tfr, sizeof(tfr));
-    g_dbc.iring->enq++;
-//    g_dbc.regs->db = 1;
+    memcpy(&g_dbc.oring->trb[g_dbc.oring->enq], &tfr, sizeof(tfr));
+    g_dbc.oring->enq++;
+    g_dbc.regs->db &= 0xFFFF00FF;
 }
