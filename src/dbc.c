@@ -295,10 +295,8 @@ void dbc_dump()
 static void handle_psce(struct trb *trb)
 {
     unsigned int *psc = &g_dbc.regs->portsc;
-    unsigned int mask = (1UL << PORTSC_CSC_SHIFT) |
-                        (1UL << PORTSC_PRC_SHIFT) |
-                        (1UL << PORTSC_PLC_SHIFT) |
-                        (1UL << PORTSC_CEC_SHIFT);
+    unsigned int mask = (1UL << PORTSC_CSC_SHIFT) | (1UL << PORTSC_PRC_SHIFT) |
+                        (1UL << PORTSC_PLC_SHIFT) | (1UL << PORTSC_CEC_SHIFT);
 
     unsigned int ack = mask & *psc;
     *psc |= ack;

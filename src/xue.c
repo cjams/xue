@@ -55,8 +55,8 @@ static int xhc_init(void)
     }
 
     /* Can't dereference until we're sure we're in VMM context */
-    char *mmio
-        = (char *)xue_map_hpa(g_xhc.mmio_hpa, g_xhc.mmio_len, XUE_MEM_UC);
+    char *mmio =
+        (char *)xue_map_hpa(g_xhc.mmio_hpa, g_xhc.mmio_len, XUE_MEM_UC);
 
     if (!mmio) {
         return 0;

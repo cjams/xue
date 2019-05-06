@@ -1,9 +1,11 @@
 AlignAfterOpenBracket: Align
 AlignEscapedNewlines: Right
+AlignOperands: true
 AllowShortFunctionsOnASingleLine: Inline
 AllowShortIfStatementsOnASingleLine: false
 AllowShortLoopsOnASingleLine: false
 BasedOnStyle: Webkit
+BreakBeforeBinaryOperators: None
 ColumnLimit: 80
 IncludeBlocks: Preserve
 PointerAlignment: Right
