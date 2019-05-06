@@ -352,29 +352,38 @@ static void handle_events(struct dbc *dbc)
     dbc->regs->erdp = sys_virt_to_phys(&er->trb[er->deq]);
 }
 
-void dbc_write(const char *data, unsigned int size)
+void dbc_ack()
 {
     handle_events(&g_dbc);
+}
 
-    struct trb tfr;
-    memset(&tfr, 0, sizeof(tfr));
+void dbc_write(const char *data, unsigned int size)
+{
+    struct trb ntrb;
+    struct trb_ring *oring;
 
-    if (trb_ring_full(g_dbc.oring)) {
-        printf("WARNING: OUT TRB ring is full\n");
+    handle_events(&g_dbc);
+
+    oring = g_dbc.oring;
+    if (trb_ring_full(oring)) {
+        printf("ALERT: OUT ring is full\n");
     }
 
-    trb_norm_set_dbp(&tfr, sys_virt_to_phys(data));
-    trb_norm_set_tfrlen(&tfr, size);
-    trb_norm_set_ioc(&tfr);
+    memset(&ntrb, 0, sizeof(ntrb));
 
-    trb_set_type(&tfr, trb_type_norm);
-    if (g_dbc.oring->pcs) {
-        trb_set_cycle(&tfr);
+    trb_set_type(&ntrb, trb_type_norm);
+    if (oring->pcs) {
+        trb_set_cycle(&ntrb);
     } else {
-        trb_clear_cycle(&tfr);
+        trb_clear_cycle(&ntrb);
     }
 
-    memcpy(&g_dbc.oring->trb[g_dbc.oring->enq], &tfr, sizeof(tfr));
-    g_dbc.oring->enq++;
+    trb_norm_set_dbp(&ntrb, sys_virt_to_phys(data));
+    trb_norm_set_tfrlen(&ntrb, size);
+    trb_norm_set_ioc(&ntrb);
+
+    memcpy(&oring->trb[oring->enq], &ntrb, sizeof(ntrb));
+    // FIXME
+    oring->enq++;
     g_dbc.regs->db &= 0xFFFF00FF;
 }

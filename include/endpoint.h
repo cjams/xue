@@ -105,7 +105,7 @@ static inline void init_endpoint(unsigned int *ep, unsigned int mbs,
     ep[1] |= (mbs << 8);
 
     /* TR dequeue pointer */
-    ep[2] = tr_phys & 0xFFFFFFFF;
+    ep[2] = (tr_phys & 0xFFFFFFFF) | 1;
     ep[3] = tr_phys >> 32;
 
     /*

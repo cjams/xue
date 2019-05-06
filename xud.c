@@ -46,5 +46,7 @@ int main(int argc, char **argv)
         test(XUE_DUMP);
     } else if (!strcmp("write", argv[1])) {
         test(XUE_WRITE);
+    } else if (!strcmp("ack", argv[1])) {
+        test(XUE_ACK);
     }
 }

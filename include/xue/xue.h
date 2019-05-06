@@ -34,11 +34,13 @@ extern "C" {
 #define XUE_DISABLE 2
 #define XUE_DUMP 3
 #define XUE_WRITE 4
+#define XUE_ACK 5
 
 void xue_init(void);
 void xue_disable(void);
 void xue_dump(void);
 void xue_write(const char *, unsigned int);
+void xue_ack(void);
 
 #ifdef __cplusplus
 }

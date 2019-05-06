@@ -95,3 +95,8 @@ void xue_write(const char *data, unsigned int size)
 {
     dbc_write(data, size);
 }
+
+void xue_ack(void)
+{
+    dbc_ack();
+}
