@@ -22,77 +22,93 @@
 #ifndef XUE_XHC_H
 #define XUE_XHC_H
 
-struct dbc_reg;
+#include "xue.h"
 
 /**
- * Common defines and interfaces for an xhc - eXtensible Host Controller
- */
-
-#pragma pack(push, 1)
-
-/* xhc device */
-extern struct xhc {
-    /* The PCI CONFIG_ADDR of the device */
-    unsigned long long cf8;
-
-    /* The size of the device's MMIO space */
-    unsigned long long mmio_len;
-
-    /* The host-physical address of the device' MMIO space */
-    unsigned long long mmio_hpa;
-
-    /* The virtual address of the device's MMIO space */
-    char *mmio;
-} g_xhc;
-
-/**
- * struct xhc_cap_regs
+ * eXtensible Host Controller (xhc)
  *
- * Each host controller has capability, operational, runtime, and
- * doorbell array registers. This struct defines the capability registers.
+ * The DbC is an optional xHCI extended capability. Before the DbC can be used,
+ * it needs to be found in the host controller's extended capability list. This
+ * list resides in the controller's MMIO region, which in turn is referred to
+ * by the 64-bit BAR0/BAR1 in the controller's PCI config space.
+ *
  */
-struct xhc_cap_regs {
-    unsigned char caplength;
-    unsigned char rsvd0;
-    unsigned short hciversion;
-    unsigned int hcsparams1;
-    unsigned int hcsparams2;
-    unsigned int hcsparams3;
-    unsigned int hccparams1;
-    unsigned int dboff;
-    unsigned int rtsoff;
-    unsigned int hccparams2;
+
+/* PCI constants */
+
+#define XHC_VENDOR 0x8086
+#define XHC_DEV_SKYLK 0xA2AF
+#define XHC_DEV_CANLK 0xA36D
+#define XHC_CLASSC 0x000C0330
+
+enum {
+    pci_hdr_normal = 0x00,
+    pci_hdr_normal_multi = 0x80 | pci_hdr_normal,
 };
 
-#pragma pack(pop)
+static inline uint32_t xhc_read_reg(struct xue *xue, uint32_t cf8, uint32_t reg)
+{
+    uint32_t addr = (cf8 & 0xFFFFFF03UL) | (reg << 2);
+    xue->outd(0xCF8, addr);
+    return xue->ind(0xCFC);
+}
 
-/**
- * find_xhc
- *
- * Scan PCI bus 0 for the xhc device
- *
- * @return 1 on success, 0 otherwise
- */
-int find_xhc(void);
+static inline void xhc_write_reg(struct xue *xue, uint32_t cf8, uint32_t reg, uint32_t val)
+{
+    uint32_t addr = (cf8 & 0xFFFFFF03UL) | (reg << 2);
+    xue->outd(0xCF8, addr);
+    xue->outd(0xCFC, val);
+}
 
-/**
- * xhc_parse_bar
- *
- * According to the xHCI spec, section 5.2.1, an xhc must only
- * have one 64-bit MMIO bar
- *
- * @return 1 on success, 0 otherwise
- */
-int xhc_parse_bar(void);
+static inline int xhc_init(struct xue *xue)
+{
+    xue->xhc_cf8 = 0;
 
-/**
- * xhc_dump_xcap_list
- *
- * Print the controller's xHCI extended capability list
- *
- * @return 1 on success, 0 otherwise
- */
-int xhc_dump_xcap_list(void);
+    // Search PCI bus 0 for the xHC
+    for (size_t devfn = 0; devfn < 256; devfn++) {
+        uint32_t dev = (devfn & 0xF8) >> 3;
+        uint32_t fun = devfn & 0x07;
+        uint32_t cf8 = (1UL << 31) | (dev << 11) | (fun << 8);
+
+        switch (xhc_read_reg(xue, cf8, 0)) {
+        case (XHC_DEV_SKYLK << 16) | XHC_VENDOR:
+        case (XHC_DEV_CANLK << 16) | XHC_VENDOR:
+            break;
+        default:
+            continue;
+        }
+
+        uint32_t hdr = (xhc_read_reg(xue, cf8, 3) & 0xFF0000U) >> 16;
+        if (hdr == pci_hdr_normal || hdr == pci_hdr_normal_multi) {
+            if ((xhc_read_reg(xue, cf8, 2) >> 8) == XHC_CLASSC) {
+                xue->xhc_cf8 = cf8;
+                break;
+            }
+        }
+    }
+
+    if (!xue->xhc_cf8) {
+        return 0;
+    }
+
+    uint32_t bar0 = xhc_read_reg(xue, xue->xhc_cf8, 4);
+    uint32_t bar1 = xhc_read_reg(xue, xue->xhc_cf8, 5);
+
+    // IO BARs not allowed, BAR must be 64-bit
+    if ((bar0 & 0x1) != 0 || ((bar0 & 0x6) >> 1) != 2) {
+        return 0;
+    }
+
+    xhc_write_reg(xue, xue->xhc_cf8, 4, 0xFFFFFFFF);
+    size_t size = ~(xhc_read_reg(xue, xue->xhc_cf8, 4) & 0xFFFFFFF0) + 1U;
+    xhc_write_reg(xue, xue->xhc_cf8, 4, bar0);
+
+    xue->xhc_mmio_size = size;
+    xue->xhc_mmio_phys = (bar0 & 0xFFFFFFF0) | ((uint64_t)bar1 << 32);
+    xue->xhc_mmio = xue->map_mmio(xue->xhc_mmio_phys, size);
+
+    return 1;
+}
 
 /**
  * The first register of the debug capability (dbc) is found by traversing the
@@ -101,9 +117,43 @@ int xhc_dump_xcap_list(void);
  *
  * The xHCI capability list (xcap) begins at address
  * mmio + (HCCPARAMS1[31:16] << 2)
- *
- * @return the base address of the dbc registers, if found. NULL otherwise.
  */
-struct dbc_reg *xhc_find_dbc_base(void);
+
+struct dbc_reg;
+
+static inline struct dbc_reg *xhc_find_dbc(struct xue *xue)
+{
+    uint8_t *mmio = xue->xhc_mmio;
+    uint32_t *hccp1 = (uint32_t *)(mmio + 0x10);
+
+    /**
+     * Paranoid check against a zero value. The spec mandates that
+     * at least one "supported protocol" capability must be implemented,
+     * so this should always be false.
+     */
+    if ((*hccp1 & 0xFFFF0000) == 0) {
+        return NULL;
+    }
+
+    uint32_t *xcap = (uint32_t *)(mmio + (((*hccp1 & 0xFFFF0000) >> 16) << 2));
+    uint32_t next = (*xcap & 0xFF00) >> 8;
+    uint32_t id = *xcap & 0xFF;
+
+    /**
+     * Table 7-1 of the xHCI spec states that 'next' is relative
+     * to the current value of xcap and is a dword offset.
+     */
+    while (id != 0x0A && next) {
+        xcap += next;
+        id = *xcap & 0xFF;
+        next = (*xcap & 0xFF00) >> 8;
+    }
+
+    if (id != 0x0A) {
+        return NULL;
+    }
+
+    return (struct dbc_reg *)xcap;
+}
 
 #endif

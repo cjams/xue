@@ -22,7 +22,7 @@
 if(PREFIX STREQUAL "vmm")
     add_library(xue)
 
-    target_sources(xue PRIVATE xue.c dbc.c trb_ring.c xhc.c portio.asm sys/bf.c)
+    target_sources(xue PRIVATE xue.c dbc.c trb_ring.c portio.asm sys/bf.c)
     target_link_libraries(xue PUBLIC vmm::bfroot)
     target_include_directories(xue PRIVATE ${PROJECT_SOURCE_DIR}/include)
 
