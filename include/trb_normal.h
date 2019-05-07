@@ -23,8 +23,8 @@
 #ifndef XUE_TRB_NORMAL_H
 #define XUE_TRB_NORMAL_H
 
-#include <trb.h>
 #include <stdio.h>
+#include <trb.h>
 
 static inline unsigned long long trb_norm_buf(struct trb *trb)
 {

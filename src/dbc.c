@@ -99,6 +99,12 @@ static struct trb_ring g_ering;
 static struct trb_ring g_oring;
 static struct trb_ring g_iring;
 
+#ifndef MAX_WRITE
+#define MAX_WRITE 4096
+#endif
+
+static char g_write[MAX_WRITE];
+
 static void trb_dump(struct trb *trb)
 {
     switch (trb_type(trb)) {
@@ -364,11 +370,18 @@ void dbc_write(const char *data, unsigned int size)
 {
     handle_events(&g_dbc);
 
+    if (size > MAX_WRITE) {
+        printf("ALERT: size %u is greater than MAX_WRITE %u\n", size,
+               MAX_WRITE);
+        size = MAX_WRITE;
+    }
+
     struct trb_ring *oring = g_dbc.oring;
     if (trb_ring_full(oring)) {
         printf("ALERT: OUT ring is full\n");
     }
 
-    trb_ring_enqueue(oring, data, size);
+    memcpy(g_write, data, size);
+    trb_ring_enqueue(oring, g_write, size);
     g_dbc.regs->db &= 0xFFFF00FF;
 }

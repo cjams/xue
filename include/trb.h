@@ -66,10 +66,7 @@ enum {
 };
 
 /* Relevant TRB completion codes */
-enum {
-    trb_cc_success = 1,
-    trb_cc_trb_err = 5
-};
+enum { trb_cc_success = 1, trb_cc_trb_err = 5 };
 
 static inline void trb_init(struct trb *trb)
 {
