@@ -470,7 +470,8 @@ static inline int xue_xhc_init(struct xue *xue)
     xue_xhc_write(xue, xue->xhc_cf8, 4, bar0);
 
     xue->xhc_mmio_phys = (bar0 & 0xFFFFFFF0) | (bar1 << 32);
-    xue->xhc_mmio = xue->ops->map_mmio(xue->xhc_mmio_phys, xue->xhc_mmio_size);
+    xue->xhc_mmio =
+        (uint8_t *)xue->ops->map_mmio(xue->xhc_mmio_phys, xue->xhc_mmio_size);
 
     return 1;
 }
@@ -987,9 +988,10 @@ static inline int xue_dbc_init(struct xue *xue)
     uint64_t erdp = 0, out = 0, in = 0;
     struct xue_ops *op = xue->ops;
     struct xue_dbc_reg *reg = xue_xhc_find_dbc(xue);
-    struct xue_dbc_ctx *ctx = op->alloc(64, sizeof(*ctx));
-    struct xue_erst_segment *erst = op->alloc(64, sizeof(*erst));
-    uint8_t *data = op->alloc(XUE_PAGE_SIZE, XUE_PAGE_SIZE);
+    struct xue_dbc_ctx *ctx = (struct xue_dbc_ctx *)op->alloc(64, sizeof(*ctx));
+    struct xue_erst_segment *erst =
+        (struct xue_erst_segment *)op->alloc(64, sizeof(*erst));
+    uint8_t *data = (uint8_t *)op->alloc(XUE_PAGE_SIZE, XUE_PAGE_SIZE);
 
     if (!reg || !ctx || !erst || !data) {
         return 0;
