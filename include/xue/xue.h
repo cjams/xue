@@ -48,6 +48,7 @@ extern "C" {
 /* -------------------------------------------------------------------------- */
 
 #if defined(KERNEL) && defined(__linux__)
+#include <linux/printk.h>
 #include <linux/types.h>
 #define PRId64 "lld"
 #endif
@@ -250,10 +251,10 @@ struct xue_trb;
 
 struct xue_trb_ring {
     struct xue_trb *trb; /* Array of TRBs */
-    uint32_t size;       /* Number of TRBs in the ring */
-    uint32_t enq;        /* The offset of the enqueue ptr */
-    uint32_t deq;        /* The offset of the dequeue ptr */
-    uint32_t cycle;      /* Cycle state toggled on each wrap-around */
+    uint32_t size; /* Number of TRBs in the ring */
+    uint32_t enq; /* The offset of the enqueue ptr */
+    uint32_t deq; /* The offset of the dequeue ptr */
+    uint32_t cycle; /* Cycle state toggled on each wrap-around */
 };
 
 #pragma pack(push, 1)
@@ -831,9 +832,8 @@ static inline int xue_trb_ring_init(struct xue *xue, struct xue_trb_ring *ring,
  * @param buf the virtual address of the data to transfer
  * @param len the number of bytes to transfer
  */
-static inline void xue_push_transfer(struct xue *xue,
-                                        struct xue_trb_ring *ring,
-                                        const uint8_t *buf, uint32_t len)
+static inline void xue_push_transfer(struct xue *xue, struct xue_trb_ring *ring,
+                                     const uint8_t *buf, uint32_t len)
 {
     struct xue_trb trb;
 
@@ -861,16 +861,15 @@ static inline void xue_pop_events(struct xue *xue)
         switch (xue_trb_type(event)) {
         case xue_trb_tfre:
             if (xue_trb_tfre_cc(event) != xue_trb_cc_success) {
-                // printf("ERROR: transfer completion code: %d\n", cc);
                 break;
             }
             tr->deq = (xue_trb_tfre_ptr(event) & 0xFFF) >> 4;
             break;
         case xue_trb_psce: {
-            unsigned int mask =
+            uint32_t mask =
                 (1UL << PORTSC_CSC_SHIFT) | (1UL << PORTSC_PRC_SHIFT) |
                 (1UL << PORTSC_PLC_SHIFT) | (1UL << PORTSC_CEC_SHIFT);
-            unsigned int ack = mask & xue->dbc_reg->portsc;
+            uint32_t ack = mask & xue->dbc_reg->portsc;
             xue->dbc_reg->portsc |= ack;
             break;
         }
@@ -1056,7 +1055,6 @@ static inline int xue_open(struct xue *xue, struct xue_ops *ops)
 static inline void xue_close(struct xue *xue)
 {
     struct xue_ops *op = xue->ops;
-    struct xue_dbc_reg *reg = xue->dbc_reg;
 
     xue_dbc_disable(xue);
 
@@ -1072,6 +1070,24 @@ static inline void xue_close(struct xue *xue)
 }
 
 static inline void xue_dump(void) {}
+
+static inline int64_t xue_write(struct xue *xue, const void *data,
+                                uint64_t size)
+{
+    struct xue_trb_ring *oring = &xue->dbc_oring;
+    size = (size > xue->dbc_datasz) ? xue->dbc_datasz : size;
+    xue_pop_events(xue);
+
+    if (xue_trb_ring_full(oring)) {
+        return 0;
+    }
+
+    xue->ops->memcpy(xue->dbc_data, data, size);
+    xue_push_transfer(xue, oring, xue->dbc_data, size);
+    xue->dbc_reg->db &= 0xFFFF00FF;
+
+    return size;
+}
 
 #ifdef __cplusplus
 }
