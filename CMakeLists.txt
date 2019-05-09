@@ -22,21 +22,8 @@
 cmake_minimum_required(VERSION 3.14)
 project(xue)
 
-enable_language(ASM_NASM)
-
-set(BUILD_SHARED_LIBS OFF)
-set(CMAKE_C_STANDARD 11)
-set(CMAKE_C_EXTENSIONS OFF)
-set(CMAKE_DIR ${PROJECT_SOURCE_DIR}/cmake)
-set(SCRIPT_DIR ${PROJECT_SOURCE_DIR}/scripts)
-
-include(ProcessorCount)
 include(cmake/format.cmake)
 
-if(NOT PREFIX)
-    add_executable(xud xud.c vmcall.asm)
-    target_include_directories(xud PRIVATE include)
-endif()
-
-add_subdirectory(src)
-#    add_subdirectory(test)
+add_library(xue INTERFACE)
+target_include_directories(xue INTERFACE ${PROJECT_SOURCE_DIR}/include/xue)
+install(DIRECTORY ${PROJECT_SOURCE_DIR}/include/xue/ DESTINATION include)
