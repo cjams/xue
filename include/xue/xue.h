@@ -218,31 +218,16 @@ enum {
     xue_ep_intr_in
 };
 
-#pragma pack(push, 1)
-
-struct xue_trb {
-    uint64_t params;
-    uint32_t status;
-    uint32_t ctrl;
-};
-
-/* TRB ring parameters. Only one-segment rings are supported */
-#define XUE_TRB_PER_PAGE (XUE_PAGE_SIZE / sizeof(struct xue_trb))
-#define XUE_PAGE_PER_SEG 1
-#define XUE_SEG_PER_RING 1
-
 /******************************************************************************
  * TRB ring
  *
  * TRB rings are circular queues of TRBs shared between the xHC and the driver.
- * Each ring has one producer and one consumer. The producer pushes items on
- * the ring by advancing the ring's enqueue pointer.  The consumer pops items
- * off the ring by advancing the ring's dequeue pointer. The DbC has one event
+ * Each ring has one producer and one consumer. The DbC has one event
  * ring and two transfer rings, one for each direction of transfer.
  *
- * The xHC hardware is the producer of all events on the event ring, and the
+ * The xHC hardware is the producer on the event ring, and the
  * driver is the consumer. This means that the event TRBs are read-only from
- * the driver. The hardware enqueues events, and the driver dequeues events.
+ * the driver.
  *
  * OTOH, the driver is the producer of all transfer TRBs on the two transfer
  * rings, so the driver enqueues transfers, and the hardware dequeues
@@ -251,25 +236,32 @@ struct xue_trb {
  * transfer event TRB contains the address of the transfer TRB that generated
  * the event.
  *
- * To make each queue circular, the last TRB must be a Link TRB, which points
- * to the beginning of the next queue.
+ * To make each queue circular, the last TRB must be a link TRB, which points
+ * to the beginning of the next queue. This implementation does not support
+ * multiple segments, so each link TRB points back to the beginning of its
+ * own segment.
  ******************************************************************************/
 
+#define XUE_TRB_PER_PAGE (XUE_PAGE_SIZE / sizeof(struct xue_trb))
+#define XUE_PAGE_PER_SEG 1
+#define XUE_SEG_PER_RING 1
+
+struct xue_trb;
+
 struct xue_trb_ring {
-    /* The array of TRBs */
-    struct xue_trb *trb;
+    struct xue_trb *trb; /* Array of TRBs */
+    uint32_t size;       /* Number of TRBs in the ring */
+    uint32_t enq;        /* The offset of the enqueue ptr */
+    uint32_t deq;        /* The offset of the dequeue ptr */
+    uint32_t cycle;      /* Cycle state toggled on each wrap-around */
+};
 
-    /* The number of TRBs in the ring */
-    uint32_t size;
+#pragma pack(push, 1)
 
-    /* The offset of the enqueue pointer from the base address */
-    uint32_t enq;
-
-    /* The offset of the dequeue pointer from the base address */
-    uint32_t deq;
-
-    /* Cycle state toggled on each ring wrap-around */
-    uint32_t cycle;
+struct xue_trb {
+    uint64_t params;
+    uint32_t status;
+    uint32_t ctrl;
 };
 
 struct xue_erst_segment {
@@ -413,7 +405,6 @@ struct xue {
  * it needs to be found in the host controller's extended capability list. This
  * list resides in the controller's MMIO region, which in turn is referred to
  * by the 64-bit BAR in the controller's PCI config space.
- *
  ******************************************************************************/
 
 static inline uint32_t xue_xhc_read(struct xue *xue, uint32_t cf8, uint32_t reg)
@@ -438,7 +429,7 @@ static inline int xue_xhc_init(struct xue *xue)
 
     xue->xhc_cf8 = 0;
 
-    /* Search PCI bus 0 for the xHC. TODO: search on buses > 0 */
+    /* Search PCI bus 0 for the xHC... TODO: search on buses > 0 */
     for (devfn = 0; devfn < 256; devfn++) {
         uint32_t dev = (devfn & 0xF8) >> 3;
         uint32_t fun = devfn & 0x07;
@@ -512,7 +503,7 @@ static inline struct xue_dbc_reg *xue_xhc_find_dbc(struct xue *xue)
     id = *xcap & 0xFF;
 
     /**
-     * Table 7-1 of the xHCI spec states that 'next' is relative
+     * Table 7-1 of the spec states that 'next' is relative
      * to the current value of xcap and is a dword offset.
      */
     while (id != 0x0A && next) {
@@ -536,11 +527,8 @@ static inline struct xue_dbc_reg *xue_xhc_find_dbc(struct xue *xue)
  *
  * There are several different types of TRBs, each with
  * their own interpretation of the 16 bytes mentioned above
- * and their own rules of use. The type is uniquely determined
- * by the ring type (i.e., command, event, or transfer) and the
- * ID assigned in Table 6-86.
+ * and their own rules of use.
  */
-
 static inline void xue_trb_init(struct xue_trb *trb)
 {
     trb->params = 0;
@@ -548,12 +536,12 @@ static inline void xue_trb_init(struct xue_trb *trb)
     trb->ctrl = 0;
 }
 
-/*
- * Fields common to every TRB (section 4.11.1). These are the fields
- * defined in the TRB template, minus the ENT bit. That bit is the toggle
- * cycle bit in link TRBs.
+/**
+ * Fields with the same interpretation for every TRB type (section 4.11.1).
+ * These are the fields defined in the TRB template, minus the ENT bit.
+ * That bit is the toggle cycle bit in link TRBs, so it shouldn't be
+ * in the template.
  */
-
 static inline uint32_t xue_trb_cycle(struct xue_trb *trb)
 {
     return trb->ctrl & 0x1;
@@ -576,9 +564,7 @@ static inline void xue_trb_set_type(struct xue_trb *trb, uint32_t t)
     trb->ctrl |= (t << 10);
 }
 
-/*
- * Fields for normal TRBs
- */
+/* Fields for normal TRBs */
 static inline uint64_t xue_trb_norm_buf(struct xue_trb *trb)
 {
     return trb->params;
@@ -669,11 +655,10 @@ static inline void xue_trb_norm_dump(struct xue_trb *trb)
     //    xue_trb_norm_ent(trb));
 }
 
-/*
+/**
  * Fields for Transfer Event TRBs (see section 6.4.2.1). Note that event
  * TRBs are read-only from software
  */
-
 static inline uint64_t xue_trb_tfre_ptr(struct xue_trb *trb)
 {
     return trb->params;
@@ -717,10 +702,7 @@ static inline void xue_trb_tfre_dump(struct xue_trb *trb)
     //           xue_trb_tfre_epid(trb), xue_trb_tfre_ed(trb));
 }
 
-/*
- * Fields for Port Status Change Event TRBs (see section 6.4.2.3)
- */
-
+/* Fields for Port Status Change Event TRBs (see section 6.4.2.3) */
 static inline uint32_t xue_trb_psce_portid(struct xue_trb *trb)
 {
     return (trb->params & 0xFF000000) >> 24;
@@ -738,10 +720,7 @@ static inline void xue_trb_psce_dump(struct xue_trb *trb)
     //           xue_trb_psce_portid(trb), xue_trb_psce_cc(trb));
 }
 
-/*
- * Fields for link TRBs (section 6.4.4.1)
- */
-
+/* Fields for link TRBs (section 6.4.4.1) */
 static inline uint64_t xue_trb_link_rsp(struct xue_trb *trb)
 {
     return trb->params;
@@ -852,7 +831,7 @@ static inline int xue_trb_ring_init(struct xue *xue, struct xue_trb_ring *ring,
  * @param buf the virtual address of the data to transfer
  * @param len the number of bytes to transfer
  */
-static inline void xue_enqueue_transfer(struct xue *xue,
+static inline void xue_push_transfer(struct xue *xue,
                                         struct xue_trb_ring *ring,
                                         const uint8_t *buf, uint32_t len)
 {
@@ -871,7 +850,7 @@ static inline void xue_enqueue_transfer(struct xue *xue,
     ring->cycle = (ring->enq) ? ring->cycle : ring->cycle ^ 1;
 }
 
-static inline void xue_dequeue_events(struct xue *xue)
+static inline void xue_pop_events(struct xue *xue)
 {
     struct xue_trb_ring *er = &xue->dbc_ering;
     struct xue_trb_ring *tr = &xue->dbc_oring;
@@ -909,10 +888,6 @@ static inline void xue_dequeue_events(struct xue *xue)
     xue->dbc_reg->erdp = erdp;
 }
 
-/******************************************************************************
- * DbC
- ******************************************************************************/
-
 static inline int xue_dbc_is_enabled(struct xue *xue)
 {
     return xue->dbc_reg->ctrl & (1UL << 31);
@@ -947,18 +922,14 @@ static inline void xue_set_ep_type(uint32_t *ep, uint32_t type)
 /**
  * xue_dbc_init_ep
  *
- * Initialize the endpoint as specified in sections 7.6.3.2 and 7.6.9.2.
- * Each endpoint is Bulk, so
- *
- *   MaxPStreams, LSA, HID, CErr, FE
- *   Interval, Mult, and Max ESIT Payload
- *
- * are all 0.
+ * Initializes the endpoint as specified in sections 7.6.3.2 and 7.6.9.2.
+ * Each endpoint is Bulk, so MaxPStreams, LSA, HID, CErr, FE,
+ * Interval, Mult, and Max ESIT Payload are all 0.
  *
  * Max packet size: 1024
  * Max burst size: debug mbs (in ctrl register)
  * EP type: 2 for OUT bulk, 6 for IN bulk
- * TR dequeue ptr: phys addr of transfer ring
+ * TR dequeue ptr: physical base address of transfer ring
  * Avg TRB length: software defined (see section 4.14.1.1)
  */
 static inline void xue_dbc_init_ep(struct xue *xue, uint32_t *ep, uint32_t mbs,
@@ -1067,7 +1038,7 @@ static inline int xue_dbc_init(struct xue *xue)
     return 1;
 }
 
-static inline int xue_init(struct xue *xue, struct xue_ops *ops)
+static inline int xue_open(struct xue *xue, struct xue_ops *ops)
 {
     xue->ops = ops;
 
@@ -1082,10 +1053,25 @@ static inline int xue_init(struct xue *xue, struct xue_ops *ops)
     return 1;
 }
 
-static inline void xue_ack(void) {}
+static inline void xue_close(struct xue *xue)
+{
+    struct xue_ops *op = xue->ops;
+    struct xue_dbc_reg *reg = xue->dbc_reg;
+
+    xue_dbc_disable(xue);
+
+    op->free(xue->dbc_strings.buf);
+    op->free(xue->dbc_ering.trb);
+    op->free(xue->dbc_oring.trb);
+    op->free(xue->dbc_iring.trb);
+    op->free(xue->dbc_data);
+    op->free(xue->dbc_erst);
+    op->free(xue->dbc_ctx);
+
+    op->unmap_mmio(xue->xhc_mmio);
+}
+
 static inline void xue_dump(void) {}
-static inline void xue_disable(void) {}
-static inline void xue_write(const char *data, uint64_t count) {}
 
 #ifdef __cplusplus
 }
