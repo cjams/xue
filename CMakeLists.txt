@@ -25,5 +25,5 @@ project(xue)
 include(cmake/format.cmake)
 
 add_library(xue INTERFACE)
-target_include_directories(xue INTERFACE ${PROJECT_SOURCE_DIR}/include/xue)
-install(DIRECTORY ${PROJECT_SOURCE_DIR}/include/xue/ DESTINATION include)
+target_include_directories(xue INTERFACE ${PROJECT_SOURCE_DIR}/include)
+install(DIRECTORY ${PROJECT_SOURCE_DIR}/include/ DESTINATION include)

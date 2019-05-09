@@ -88,7 +88,6 @@ extern "C" {
 
 #define XUE_PAGE_SIZE 4096
 #define XUE_RING_ALIGN XUE_PAGE_SIZE
-#define XUE_CACHE_ALIGN 64
 
 /* xHC PCI config */
 #define XUE_XHC_CLASSC 0xC0330
@@ -521,14 +520,13 @@ static inline struct xue_dbc_reg *xue_xhc_find_dbc(struct xue *xue)
 }
 
 /**
- * Transfer request blocks (TRBs) are the basic blocks on which
- * all DbC (and xHC) transactions occur. Each TRB is 16 bytes,
- * with the first 8 bytes being the TRB "parameters", next 4
- * bytes the "status" and the next 4 bytes the "control".
+ * Transfer request blocks (TRBs) are the basic blocks on which all DbC (and
+ * xHC) transactions occur. Each TRB is 16 bytes, with the first 8 bytes being
+ * the TRB "parameters", next 4 bytes the "status" and the next 4 bytes the
+ * "control".
  *
- * There are several different types of TRBs, each with
- * their own interpretation of the 16 bytes mentioned above
- * and their own rules of use.
+ * There are several different types of TRBs, each with their own
+ * interpretation of the 16 bytes mentioned above and their own rules of use.
  */
 static inline void xue_trb_init(struct xue_trb *trb)
 {
@@ -539,9 +537,9 @@ static inline void xue_trb_init(struct xue_trb *trb)
 
 /**
  * Fields with the same interpretation for every TRB type (section 4.11.1).
- * These are the fields defined in the TRB template, minus the ENT bit.
- * That bit is the toggle cycle bit in link TRBs, so it shouldn't be
- * in the template.
+ * These are the fields defined in the TRB template, minus the ENT bit. That
+ * bit is the toggle cycle bit in link TRBs, so it shouldn't be in the
+ * template.
  */
 static inline uint32_t xue_trb_cycle(struct xue_trb *trb)
 {
