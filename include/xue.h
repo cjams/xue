@@ -316,13 +316,12 @@ struct xue_ops {
     void *(*memcpy)(void *dest, const void *src, uint64_t count);
 
     /**
-     * alloc - allocate aligned memory
+     * alloc_pages - allocate virtually-contiguous 4KB pages
      *
-     * @param align the minimum required alignment
-     * @param count the number of bytes to allocate
-     * @return the allocated memory
+     * @param order - allocate 2^order pages
+     * @return the allocated pages
      */
-    void *(*alloc)(uint64_t align, uint64_t count);
+    void *(*alloc_pages)(uint64_t order);
 
     /**
      * map_mmio - map in PCI device MMIO region (uncacheable)
@@ -334,18 +333,19 @@ struct xue_ops {
     void *(*map_mmio)(uint64_t phys, uint64_t count);
 
     /**
-     * free - release previously alloc()'d memory
+     * free_pages - release previously alloc_pages()'d page range
      *
-     * @param addr the address to free
+     * @param addr the base address of the pages to free
+     * @param order the order given to alloc_pages
      */
-    void (*free)(const void *addr);
+    void (*free_pages)(void *addr, uint64_t order);
 
     /**
      * unmap_mmio - release previously map_mmio()'d region
      *
      * @param virt the address to unmap
      */
-    void (*unmap_mmio)(const void *virt);
+    void (*unmap_mmio)(void *virt);
 
     /**
      * outd - write 32 bits to IO port
@@ -384,6 +384,7 @@ struct xue {
     uint8_t *xhc_mmio;
     uint64_t xhc_mmio_phys;
     uint64_t xhc_mmio_size;
+    uint64_t xhc_dbc_offset;
     uint32_t xhc_cf8;
 
     // DbC fields
@@ -397,6 +398,16 @@ struct xue {
     uint8_t *dbc_data;
     uint64_t dbc_datasz;
 };
+
+static inline void *xue_alloc_page(struct xue *xue)
+{
+    return xue->ops->alloc_pages(0);
+}
+
+static inline void xue_free_page(struct xue *xue, void *addr)
+{
+    return xue->ops->free_pages(addr, 0);
+}
 
 /******************************************************************************
  * eXtensible Host Controller (xhc)
@@ -517,6 +528,7 @@ static inline struct xue_dbc_reg *xue_xhc_find_dbc(struct xue *xue)
         return NULL;
     }
 
+    xue->xhc_dbc_offset = (uint64_t)xcap - (uint64_t)mmio;
     return (struct xue_dbc_reg *)xcap;
 }
 
@@ -796,9 +808,9 @@ static inline int xue_trb_ring_init(struct xue *xue, struct xue_trb_ring *ring,
     struct xue_ops *op;
     struct xue_trb *trb;
 
-    ring->size = XUE_PAGE_PER_SEG * XUE_TRB_PER_PAGE;
+    ring->size = XUE_TRB_PER_PAGE;
     op = xue->ops;
-    trb = (struct xue_trb *)op->alloc(XUE_PAGE_SIZE, ring->size);
+    trb = (struct xue_trb *)xue_alloc_page(xue);
     if (!trb) {
         return 0;
     }
@@ -967,7 +979,7 @@ static inline int xue_dbc_init_info(struct xue *xue, uint32_t *info)
     struct xue_string *str = &xue->dbc_strings;
 
     str->len = sizeof(usb_str);
-    str->buf = (char *)op->alloc(2, str->len);
+    str->buf = (char *)xue_alloc_page(xue);
     if (!str->buf) {
         return 0;
     }
@@ -988,10 +1000,10 @@ static inline int xue_dbc_init(struct xue *xue)
     uint64_t erdp = 0, out = 0, in = 0;
     struct xue_ops *op = xue->ops;
     struct xue_dbc_reg *reg = xue_xhc_find_dbc(xue);
-    struct xue_dbc_ctx *ctx = (struct xue_dbc_ctx *)op->alloc(64, sizeof(*ctx));
+    struct xue_dbc_ctx *ctx = (struct xue_dbc_ctx *)xue_alloc_page(xue);
     struct xue_erst_segment *erst =
-        (struct xue_erst_segment *)op->alloc(64, sizeof(*erst));
-    uint8_t *data = (uint8_t *)op->alloc(XUE_PAGE_SIZE, XUE_PAGE_SIZE);
+        (struct xue_erst_segment *)xue_alloc_page(xue);
+    uint8_t *data = (uint8_t *)xue_alloc_page(xue);
 
     if (!reg || !ctx || !erst || !data) {
         return 0;
@@ -1054,19 +1066,17 @@ static inline int xue_open(struct xue *xue, struct xue_ops *ops)
 
 static inline void xue_close(struct xue *xue)
 {
-    struct xue_ops *op = xue->ops;
-
     xue_dbc_disable(xue);
 
-    op->free(xue->dbc_strings.buf);
-    op->free(xue->dbc_ering.trb);
-    op->free(xue->dbc_oring.trb);
-    op->free(xue->dbc_iring.trb);
-    op->free(xue->dbc_data);
-    op->free(xue->dbc_erst);
-    op->free(xue->dbc_ctx);
+    xue_free_page(xue, xue->dbc_strings.buf);
+    xue_free_page(xue, xue->dbc_ering.trb);
+    xue_free_page(xue, xue->dbc_oring.trb);
+    xue_free_page(xue, xue->dbc_iring.trb);
+    xue_free_page(xue, xue->dbc_data);
+    xue_free_page(xue, xue->dbc_erst);
+    xue_free_page(xue, xue->dbc_ctx);
 
-    op->unmap_mmio(xue->xhc_mmio);
+    xue->ops->unmap_mmio(xue->xhc_mmio);
 }
 
 static inline void xue_dump(void) {}
