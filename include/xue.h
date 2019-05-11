@@ -300,20 +300,20 @@ struct xue_ops {
      *
      * @param dest the destination buffer to fill
      * @param c the byte to fill with
-     * @param count the number of bytes to fill
+     * @param size the number of bytes to fill
      * @return the destination buffer post-fill
      */
-    void *(*memset)(void *dest, int c, uint64_t count);
+    void *(*memset)(void *dest, int c, uint64_t size);
 
     /**
      * memcpy - copy memory from src to dest
      *
      * @param dest the destination buffer
      * @param src the src buffer
-     * @param count the number of bytes to copy from src into buffer
+     * @param size the number of bytes to copy from src into buffer
      * @return the destination buffer post-copy
      */
-    void *(*memcpy)(void *dest, const void *src, uint64_t count);
+    void *(*memcpy)(void *dest, const void *src, uint64_t size);
 
     /**
      * alloc_pages - allocate virtually-contiguous 4KB pages
@@ -324,21 +324,21 @@ struct xue_ops {
     void *(*alloc_pages)(uint64_t order);
 
     /**
-     * map_mmio - map in PCI device MMIO region (uncacheable)
-     *
-     * @param phys the physical address to map in
-     * @param count the number of bytes to map in
-     * @return the virtual address
-     */
-    void *(*map_mmio)(uint64_t phys, uint64_t count);
-
-    /**
      * free_pages - release previously alloc_pages()'d page range
      *
      * @param addr the base address of the pages to free
      * @param order the order given to alloc_pages
      */
     void (*free_pages)(void *addr, uint64_t order);
+
+    /**
+     * map_mmio - map in uncacheable MMIO region
+     *
+     * @param phys the physical address to map in
+     * @param size the number of bytes to map in
+     * @return the virtual address
+     */
+    void *(*map_mmio)(uint64_t phys, uint64_t size);
 
     /**
      * unmap_mmio - release previously map_mmio()'d region
@@ -370,6 +370,12 @@ struct xue_ops {
      * @return the resulting physical address
      */
     uint64_t (*virt_to_phys)(const void *virt);
+
+    /**
+     * sfence - write memory barrier
+     */
+    void (*sfence)(void);
+    void (*mfence)(void);
 };
 
 struct xue_string {
@@ -490,9 +496,7 @@ static inline int xue_xhc_init(struct xue *xue)
 /**
  * The first register of the debug capability (dbc) is found by traversing the
  * host controller's capability list (xcap) until a capability
- * with ID = 0xA is found.
- *
- * The xHCI capability list (xcap) begins at address
+ * with ID = 0xA is found. The xHCI capability list (xcap) begins at address
  * mmio + (HCCPARAMS1[31:16] << 2)
  */
 static inline struct xue_dbc_reg *xue_xhc_find_dbc(struct xue *xue)
@@ -792,29 +796,20 @@ static inline void xue_trb_link_dump(struct xue_trb *trb)
     //           xue_trb_link_ch(trb), xue_trb_link_tc(trb));
 }
 
-static inline int xue_trb_ring_empty(struct xue_trb_ring *ring)
-{
-    return ring->enq == ring->deq;
-}
-
-static inline int xue_trb_ring_full(struct xue_trb_ring *ring)
-{
-    return ((ring->enq + 1) & (ring->size - 1)) == ring->deq;
-}
-
 static inline int xue_trb_ring_init(struct xue *xue, struct xue_trb_ring *ring,
                                     int producer)
 {
     struct xue_ops *op;
     struct xue_trb *trb;
 
-    ring->size = XUE_TRB_PER_PAGE;
     op = xue->ops;
     trb = (struct xue_trb *)xue_alloc_page(xue);
+
     if (!trb) {
         return 0;
     }
 
+    ring->size = XUE_TRB_PER_PAGE;
     op->memset(trb, 0, ring->size);
 
     ring->trb = trb;
@@ -842,11 +837,22 @@ static inline int xue_trb_ring_init(struct xue *xue, struct xue_trb_ring *ring,
  * @param ring the ring to enqueue
  * @param buf the virtual address of the data to transfer
  * @param len the number of bytes to transfer
+ * @return the number of bytes queued for transfer
  */
-static inline void xue_push_transfer(struct xue *xue, struct xue_trb_ring *ring,
-                                     const uint8_t *buf, uint32_t len)
+static inline int64_t xue_push_transfer(struct xue *xue,
+                                        struct xue_trb_ring *ring,
+                                        const uint8_t *buf, uint32_t len)
 {
     struct xue_trb trb;
+
+    if (((ring->enq + 1) & (ring->size - 1)) == ring->deq) {
+        return 0;
+    }
+
+    if (ring->enq == ring->size - 1) {
+        ring->enq = 0;
+        ring->cycle ^= 1;
+    }
 
     xue_trb_init(&trb);
     xue_trb_set_type(&trb, xue_trb_norm);
@@ -856,9 +862,8 @@ static inline void xue_push_transfer(struct xue *xue, struct xue_trb_ring *ring,
     xue_trb_norm_set_len(&trb, len);
     xue_trb_norm_set_ioc(&trb);
 
-    ring->trb[ring->enq] = trb;
-    ring->enq = (ring->enq + 1) & (ring->size - 1);
-    ring->cycle = (ring->enq) ? ring->cycle : ring->cycle ^ 1;
+    ring->trb[ring->enq++] = trb;
+    return len;
 }
 
 static inline void xue_pop_events(struct xue *xue)
@@ -896,6 +901,7 @@ static inline void xue_pop_events(struct xue *xue)
     erdp &= ~0xFFFULL;
     erdp |= (er->deq << 4);
     xue->dbc_reg->erdp = erdp;
+    xue->ops->mfence();
 }
 
 static inline int xue_dbc_is_enabled(struct xue *xue)
@@ -1084,16 +1090,14 @@ static inline void xue_dump(void) {}
 static inline int64_t xue_write(struct xue *xue, const void *data,
                                 uint64_t size)
 {
-    struct xue_trb_ring *oring = &xue->dbc_oring;
-    size = (size > xue->dbc_datasz) ? xue->dbc_datasz : size;
     xue_pop_events(xue);
 
-    if (xue_trb_ring_full(oring)) {
-        return 0;
-    }
-
+    size = (size > xue->dbc_datasz) ? xue->dbc_datasz : size;
     xue->ops->memcpy(xue->dbc_data, data, size);
-    xue_push_transfer(xue, oring, xue->dbc_data, size);
+    size = xue_push_transfer(xue, &xue->dbc_oring, xue->dbc_data, size);
+
+done:
+    xue->ops->mfence();
     xue->dbc_reg->db &= 0xFFFF00FF;
 
     return size;

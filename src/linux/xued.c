@@ -29,9 +29,7 @@ int xued_init(void)
     return 0;
 }
 
-void xued_exit(void)
-{
-}
+void xued_exit(void) {}
 
 module_init(xued_init);
 module_exit(xued_exit);
