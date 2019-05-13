@@ -242,6 +242,7 @@ enum {
  * own segment.
  ******************************************************************************/
 
+#define XUE_TRB_MAX_LEN (4096 << 4)
 #define XUE_TRB_PER_PAGE (XUE_PAGE_SIZE / sizeof(struct xue_trb))
 #define XUE_PAGE_PER_SEG 1
 #define XUE_SEG_PER_RING 1
@@ -254,6 +255,19 @@ struct xue_trb_ring {
     uint32_t enq; /* The offset of the enqueue ptr */
     uint32_t deq; /* The offset of the dequeue ptr */
     uint32_t cycle; /* Cycle state toggled on each wrap-around */
+};
+
+/* Defines the size of the work ring as 2^XUE_WORK_ORDER 4K pages */
+#ifndef XUE_WORK_ORDER
+#define XUE_WORK_ORDER 3
+#endif
+
+struct xue_work_ring {
+    uint8_t *buf;
+    uint32_t enq;
+    uint32_t order;
+    uint64_t phys;
+    uint32_t size;
 };
 
 #pragma pack(push, 1)
@@ -401,8 +415,8 @@ struct xue {
     struct xue_trb_ring dbc_oring;
     struct xue_trb_ring dbc_iring;
     struct xue_string dbc_strings;
-    uint8_t *dbc_data;
-    uint64_t dbc_datasz;
+
+    struct xue_work_ring out_work;
 };
 
 static inline void *xue_alloc_page(struct xue *xue)
@@ -647,6 +661,12 @@ static inline void xue_trb_norm_set_len(struct xue_trb *trb, uint32_t len)
     trb->status |= len;
 }
 
+static inline void xue_trb_norm_set_chain(struct xue_trb *trb, int chain)
+{
+    trb->ctrl &= ~0x10UL;
+    trb->ctrl |= (chain) ? 0x10UL : 0;
+}
+
 static inline void xue_trb_norm_set_ioc(struct xue_trb *trb)
 {
     trb->ctrl |= 0x20;
@@ -831,39 +851,33 @@ static inline int xue_trb_ring_init(struct xue *xue, struct xue_trb_ring *ring,
 }
 
 /**
- * Push a new work item on the transfer ring. This is undefined for event rings
- * since they are read-only. The provided ring must not be full.
+ * Push a new work item on the OUT transfer ring. This is undefined for event
+ * rings since they are read-only.
  *
- * @param ring the ring to enqueue
- * @param buf the virtual address of the data to transfer
- * @param len the number of bytes to transfer
- * @return the number of bytes queued for transfer
  */
-static inline int64_t xue_push_transfer(struct xue *xue,
-                                        struct xue_trb_ring *ring,
-                                        const uint8_t *buf, uint32_t len)
+static inline void xue_push_out_trb(struct xue *xue, size_t size)
 {
     struct xue_trb trb;
+    struct xue_trb_ring *out;
+    struct xue_work_ring *wrk;
 
-    if (((ring->enq + 1) & (ring->size - 1)) == ring->deq) {
-        return 0;
-    }
+    out = &xue->dbc_oring;
+    wrk = &xue->out_work;
 
-    if (ring->enq == ring->size - 1) {
-        ring->enq = 0;
-        ring->cycle ^= 1;
+    if (out->enq == out->size - 1) {
+        out->enq = 0;
+        out->cycle ^= 1;
     }
 
     xue_trb_init(&trb);
     xue_trb_set_type(&trb, xue_trb_norm);
-    xue_trb_set_cycle(&trb, ring->cycle);
+    xue_trb_set_cycle(&trb, out->cycle);
 
-    xue_trb_norm_set_buf(&trb, xue->ops->virt_to_phys(buf));
-    xue_trb_norm_set_len(&trb, len);
+    xue_trb_norm_set_buf(&trb, wrk->phys + wrk->enq);
+    xue_trb_norm_set_len(&trb, size);
     xue_trb_norm_set_ioc(&trb);
 
-    ring->trb[ring->enq++] = trb;
-    return len;
+    out->trb[out->enq++] = trb;
 }
 
 static inline void xue_pop_events(struct xue *xue)
@@ -1048,15 +1062,13 @@ static inline int xue_dbc_init(struct xue *xue)
     reg->ddi1 = (XUE_DBC_VENDOR << 16) | XUE_DBC_PROTOCOL;
     reg->ddi2 = XUE_DBC_PRODUCT;
 
-    xue->dbc_data = data;
-    xue->dbc_datasz = XUE_PAGE_SIZE;
-
     xue_dbc_enable(xue);
     return 1;
 }
 
 static inline int xue_open(struct xue *xue, struct xue_ops *ops)
 {
+    struct xue_work_ring *wrk;
     xue->ops = ops;
 
     if (!xue_xhc_init(xue)) {
@@ -1066,6 +1078,17 @@ static inline int xue_open(struct xue *xue, struct xue_ops *ops)
     if (!xue_dbc_init(xue)) {
         return 0;
     }
+
+    wrk = &xue->out_work;
+    wrk->buf = (uint8_t *)xue_alloc_page(xue);
+    if (!wrk->buf) {
+        return 0;
+    }
+
+    wrk->enq = 0;
+    wrk->order = XUE_WORK_ORDER;
+    wrk->phys = ops->virt_to_phys(wrk->buf);
+    wrk->size = XUE_PAGE_SIZE << wrk->order;
 
     return 1;
 }
@@ -1078,23 +1101,54 @@ static inline void xue_close(struct xue *xue)
     xue_free_page(xue, xue->dbc_ering.trb);
     xue_free_page(xue, xue->dbc_oring.trb);
     xue_free_page(xue, xue->dbc_iring.trb);
-    xue_free_page(xue, xue->dbc_data);
     xue_free_page(xue, xue->dbc_erst);
     xue_free_page(xue, xue->dbc_ctx);
+    xue_free_page(xue, xue->out_work.buf);
 
     xue->ops->unmap_mmio(xue->xhc_mmio);
 }
 
 static inline void xue_dump(void) {}
 
-static inline int64_t xue_write(struct xue *xue, const void *data,
+static inline int64_t xue_write(struct xue *xue, const uint8_t *data,
                                 uint64_t size)
 {
+    struct xue_ops *ops;
+    struct xue_trb_ring *out;
+    struct xue_work_ring *wrk;
+
     xue_pop_events(xue);
 
-    size = (size > xue->dbc_datasz) ? xue->dbc_datasz : size;
-    xue->ops->memcpy(xue->dbc_data, data, size);
-    size = xue_push_transfer(xue, &xue->dbc_oring, xue->dbc_data, size);
+    ops = xue->ops;
+    out = &xue->dbc_oring;
+    wrk = &xue->out_work;
+
+    if (((out->enq + 1) & (out->size - 1)) == out->deq) {
+        return 0;
+    }
+
+    size = (size > wrk->size) ? wrk->size : size;
+    size = (size > XUE_TRB_MAX_LEN) ? XUE_TRB_MAX_LEN : size;
+
+    if (size <= wrk->size - wrk->enq) {
+        xue_push_out_trb(xue, size);
+        ops->memcpy(&wrk->buf[wrk->enq], data, size);
+        wrk->enq += size;
+    } else {
+        uint64_t nr = wrk->size - wrk->enq;
+        xue_push_out_trb(xue, nr);
+        ops->memcpy(&wrk->buf[wrk->enq], data, nr);
+        wrk->enq = 0;
+
+        if (((out->enq + 1) & (out->size - 1)) == out->deq) {
+            size = nr;
+            goto done;
+        }
+
+        xue_push_out_trb(xue, size - nr);
+        ops->memcpy(&wrk->buf[wrk->enq], data + nr, size - nr);
+        wrk->enq = size - nr;
+    }
 
 done:
     xue->ops->mfence();
