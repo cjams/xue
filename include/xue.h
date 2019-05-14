@@ -309,27 +309,27 @@ struct xue_dbc_reg {
 
 struct xue_ops {
     /**
-     * memset - fill memory with a constant byte
+     * mset - fill memory with a constant byte
      *
      * @param dest the destination buffer to fill
      * @param c the byte to fill with
      * @param size the number of bytes to fill
      * @return the destination buffer post-fill
      */
-    void *(*memset)(void *dest, int c, uint64_t size);
+    void *(*mset)(void *dest, int c, uint64_t size);
 
     /**
-     * memcpy - copy memory from src to dest
+     * mcpy - copy memory from src to dest
      *
      * @param dest the destination buffer
      * @param src the src buffer
      * @param size the number of bytes to copy from src into buffer
      * @return the destination buffer post-copy
      */
-    void *(*memcpy)(void *dest, const void *src, uint64_t size);
+    void *(*mcpy)(void *dest, const void *src, uint64_t size);
 
     /**
-     * alloc_pages - allocate virtually-contiguous 4KB pages
+     * alloc_pages
      *
      * @param order - allocate 2^order pages
      * @return the allocated pages
@@ -822,7 +822,7 @@ static inline int xue_trb_ring_init(struct xue *xue, struct xue_trb_ring *ring,
         return 0;
     }
 
-    ops->memset(trb, 0, XUE_TRB_RING_SIZE * sizeof(*trb));
+    ops->mset(trb, 0, XUE_TRB_RING_SIZE * sizeof(*trb));
 
     ring->trb = trb;
     ring->enq = 0;
@@ -952,7 +952,7 @@ static inline void xue_set_ep_type(uint32_t *ep, uint32_t type)
 static inline void xue_dbc_init_ep(struct xue *xue, uint32_t *ep, uint32_t mbs,
                                    uint32_t type, uint64_t tr_phys)
 {
-    xue->ops->memset(ep, 0, DBC_CTX_BYTES);
+    xue->ops->mset(ep, 0, DBC_CTX_BYTES);
     xue_set_ep_type(ep, type);
 
     ep[1] |= (1024 << 16) | (mbs << 8);
@@ -989,7 +989,7 @@ static inline int xue_dbc_init_info(struct xue *xue, uint32_t *info)
         return 0;
     }
 
-    xue->ops->memcpy(str->buf, usb_str, str->len);
+    xue->ops->mcpy(str->buf, usb_str, str->len);
     sda[0] = xue->ops->virt_to_phys(&str->buf[0]);
     sda[1] = sda[0] + st0len;
     sda[2] = sda[0] + st0len + mfrlen;
@@ -1024,7 +1024,7 @@ static inline int xue_dbc_init(struct xue *xue)
         return 0;
     }
 
-    op->memset(erst, 0, sizeof(*erst));
+    op->mset(erst, 0, sizeof(*erst));
     erst->base = erdp;
     erst->size = XUE_TRB_RING_SIZE;
     xue->dbc_erst = erst;
@@ -1033,7 +1033,7 @@ static inline int xue_dbc_init(struct xue *xue)
     out = op->virt_to_phys(xue->dbc_oring.trb);
     in = op->virt_to_phys(xue->dbc_iring.trb);
 
-    op->memset(ctx, 0, sizeof(*ctx));
+    op->mset(ctx, 0, sizeof(*ctx));
     xue_dbc_init_info(xue, ctx->info);
     xue_dbc_init_ep(xue, ctx->ep_out, max_burst, xue_ep_bulk_out, out);
     xue_dbc_init_ep(xue, ctx->ep_in, max_burst, xue_ep_bulk_in, in);
@@ -1114,12 +1114,12 @@ static inline int64_t xue_write(struct xue *xue, const uint8_t *data,
     size = (size > XUE_TRB_MAX_TFR) ? XUE_TRB_MAX_TFR : size;
     if (size <= XUE_WORK_RING_SIZE - wrk->enq) {
         xue_push_transfer(xue, size);
-        ops->memcpy(&wrk->buf[wrk->enq], data, size);
+        ops->mcpy(&wrk->buf[wrk->enq], data, size);
         wrk->enq += size;
     } else {
         uint64_t nr = XUE_WORK_RING_SIZE - wrk->enq;
         xue_push_transfer(xue, nr);
-        ops->memcpy(&wrk->buf[wrk->enq], data, nr);
+        ops->mcpy(&wrk->buf[wrk->enq], data, nr);
         wrk->enq = 0;
         if (((out->enq + 1) & (XUE_TRB_RING_SIZE - 1)) == out->deq) {
             size = nr;
@@ -1127,7 +1127,7 @@ static inline int64_t xue_write(struct xue *xue, const uint8_t *data,
         }
 
         xue_push_transfer(xue, size - nr);
-        ops->memcpy(&wrk->buf[wrk->enq], data + nr, size - nr);
+        ops->mcpy(&wrk->buf[wrk->enq], data + nr, size - nr);
         wrk->enq = size - nr;
     }
 
