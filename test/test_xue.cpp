@@ -19,13 +19,17 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <pci.h>
-#include <stdio.h>
+#include <stdint.h>
 
-int main()
+#include <catch2/catch.hpp>
+#include <xue.h>
+
+struct xue xue;
+
+struct xue_ops ops = {
+};
+
+TEST_CASE("test")
 {
-    unsigned int cf8 = 0;
-
-    printf("cf8 is enabled: %d\n", cf8_is_enabled(cf8));
-    printf("cf8 is enabled: %d\n", cf8_is_enabled(cf8 | (1UL << 31)));
+    CHECK(1);
 }

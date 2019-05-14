@@ -22,8 +22,27 @@
 cmake_minimum_required(VERSION 3.14)
 project(xue)
 
-include(cmake/format.cmake)
-
 add_library(xue INTERFACE)
 target_include_directories(xue INTERFACE ${PROJECT_SOURCE_DIR}/include)
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/include/ DESTINATION include)
+
+find_program(FORMAT NAMES clang-format REQUIRED)
+add_custom_target(format COMMAND
+    ${PROJECT_SOURCE_DIR}/scripts/format.sh
+    ${PROJECT_SOURCE_DIR}
+    ${FORMAT}
+)
+
+option(BUILD_TESTS "Build unit tests")
+
+if(BUILD_TESTS)
+    enable_testing()
+    find_package(Catch2 REQUIRED)
+    add_library(catch test/catch.cpp)
+
+    add_executable(test_xue test/test_xue.cpp)
+    target_link_libraries(test_xue catch)
+    target_include_directories(test_xue PRIVATE ${PROJECT_SOURCE_DIR}/include)
+
+    add_test(NAME test_xue COMMAND test_xue)
+endif()
