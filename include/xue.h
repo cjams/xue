@@ -90,9 +90,9 @@ extern "C" {
 
 /* xHC PCI config */
 #define XUE_XHC_CLASSC 0xC0330
-#define XUE_XHC_VENDOR 0x8086
-#define XUE_XHC_DEV_SKYLAKE 0xA2AF
-#define XUE_XHC_DEV_CANNONLAKE 0xA36D
+#define XUE_XHC_VEN_INTEL 0x8086
+#define XUE_XHC_DEV_SKYLK 0xA2AF
+#define XUE_XHC_DEV_CANLK 0xA36D
 
 /* DbC USB config */
 #define XUE_DBC_VENDOR 0x1d6b
@@ -244,7 +244,7 @@ enum {
 #define XUE_TRB_MAX_TFR (4096 << 4)
 #define XUE_TRB_PER_PAGE (XUE_PAGE_SIZE / sizeof(struct xue_trb))
 
-/* Defines the size of the TRB rings as 2^XUE_TRB_RING_ORDER 4K pages */
+/* Defines the size in bytes of TRB rings as 2^XUE_TRB_RING_ORDER * 4096 */
 #ifndef XUE_TRB_RING_ORDER
 #define XUE_TRB_RING_ORDER 0
 #endif
@@ -257,7 +257,7 @@ struct xue_trb_ring {
     uint8_t cyc; /* Cycle state toggled on each wrap-around */
 };
 
-/* Defines the size of the work ring as 2^XUE_WORK_RING_ORDER 4K pages */
+/* Defines the size in bytes of work rings as 2^XUE_WORK_RING_ORDER * 4096 */
 #ifndef XUE_WORK_RING_ORDER
 #define XUE_WORK_RING_ORDER 3
 #endif
@@ -329,7 +329,7 @@ struct xue_ops {
     void *(*mcpy)(void *dest, const void *src, uint64_t size);
 
     /**
-     * alloc_pages
+     * alloc_pages (optional)
      *
      * @param order - allocate 2^order pages
      * @return the allocated pages
@@ -337,28 +337,28 @@ struct xue_ops {
     void *(*alloc_pages)(uint64_t order);
 
     /**
-     * free_pages - release previously alloc_pages()'d page range
+     * free_pages (must be != NULL if alloc_pages != NULL)
      *
      * @param addr the base address of the pages to free
-     * @param order the order given to alloc_pages
+     * @param order the order of the set of pages to free
      */
     void (*free_pages)(void *addr, uint64_t order);
 
     /**
-     * map_mmio - map in uncacheable MMIO region
+     * map_xhc - map in the xHC MMIO region as UC memory
      *
-     * @param phys the physical address to map in
+     * @param phys the physical base address of the xHC
      * @param size the number of bytes to map in
-     * @return the virtual address
+     * @return the mapped virtual address
      */
-    void *(*map_mmio)(uint64_t phys, uint64_t size);
+    void *(*map_xhc)(uint64_t phys, uint64_t size);
 
     /**
-     * unmap_mmio - release previously map_mmio()'d region
+     * unmap_xhc (optional)
      *
      * @param virt the address to unmap
      */
-    void (*unmap_mmio)(void *virt);
+    void (*unmap_xhc)(void *virt);
 
     /**
      * outd - write 32 bits to IO port
@@ -390,22 +390,15 @@ struct xue_ops {
     void (*sfence)(void);
 };
 
-struct xue_string {
-    char *buf;
-    uint64_t len;
-};
-
 struct xue {
     struct xue_ops *ops;
 
-    // xHC fields
     uint8_t *xhc_mmio;
     uint64_t xhc_mmio_phys;
     uint64_t xhc_mmio_size;
     uint64_t xhc_dbc_offset;
     uint32_t xhc_cf8;
 
-    // DbC fields
     struct xue_dbc_reg *dbc_reg;
     struct xue_dbc_ctx *dbc_ctx;
     struct xue_erst_segment *dbc_erst;
@@ -413,18 +406,8 @@ struct xue {
     struct xue_trb_ring dbc_oring;
     struct xue_trb_ring dbc_iring;
     struct xue_work_ring dbc_owork;
-    struct xue_string dbc_strings;
+    char *dbc_str;
 };
-
-static inline void *xue_alloc_page(struct xue *xue)
-{
-    return xue->ops->alloc_pages(0);
-}
-
-static inline void xue_free_page(struct xue *xue, void *addr)
-{
-    return xue->ops->free_pages(addr, 0);
-}
 
 /******************************************************************************
  * eXtensible Host Controller (xhc)
@@ -465,8 +448,8 @@ static inline int xue_xhc_init(struct xue *xue)
         uint32_t hdr = (xue_xhc_read(xue, cf8, 3) & 0xFF0000U) >> 16;
 
         switch (xue_xhc_read(xue, cf8, 0)) {
-        case (XUE_XHC_DEV_SKYLAKE << 16) | XUE_XHC_VENDOR:
-        case (XUE_XHC_DEV_CANNONLAKE << 16) | XUE_XHC_VENDOR:
+        case (XUE_XHC_DEV_SKYLK << 16) | XUE_XHC_VEN_INTEL:
+        case (XUE_XHC_DEV_CANLK << 16) | XUE_XHC_VEN_INTEL:
             break;
         default:
             continue;
@@ -499,7 +482,7 @@ static inline int xue_xhc_init(struct xue *xue)
 
     xue->xhc_mmio_phys = (bar0 & 0xFFFFFFF0) | (bar1 << 32);
     xue->xhc_mmio =
-        (uint8_t *)xue->ops->map_mmio(xue->xhc_mmio_phys, xue->xhc_mmio_size);
+        (uint8_t *)xue->ops->map_xhc(xue->xhc_mmio_phys, xue->xhc_mmio_size);
 
     return 1;
 }
@@ -810,21 +793,10 @@ static inline void xue_trb_link_dump(struct xue_trb *trb)
     //           xue_trb_link_ch(trb), xue_trb_link_tc(trb));
 }
 
-static inline int xue_trb_ring_init(struct xue *xue, struct xue_trb_ring *ring,
-                                    int producer)
+static inline void xue_trb_ring_init(struct xue *xue, struct xue_trb_ring *ring,
+                                     int producer)
 {
-    struct xue_ops *ops;
-    struct xue_trb *trb;
-
-    ops = xue->ops;
-    trb = (struct xue_trb *)ops->alloc_pages(XUE_TRB_RING_ORDER);
-    if (!trb) {
-        return 0;
-    }
-
-    ops->mset(trb, 0, XUE_TRB_RING_SIZE * sizeof(*trb));
-
-    ring->trb = trb;
+    xue->ops->mset(ring->trb, 0, XUE_TRB_RING_SIZE * sizeof(*ring->trb));
     ring->enq = 0;
     ring->deq = 0;
     ring->cyc = 1;
@@ -834,12 +806,10 @@ static inline int xue_trb_ring_init(struct xue *xue, struct xue_trb_ring *ring,
      * link TRB at the end that points back to trb[0]
      */
     if (producer) {
-        struct xue_trb *link = &trb[XUE_TRB_RING_SIZE - 1];
-        xue_trb_link_set_rsp(link, ops->virt_to_phys(trb));
+        struct xue_trb *link = &ring->trb[XUE_TRB_RING_SIZE - 1];
+        xue_trb_link_set_rsp(link, xue->ops->virt_to_phys(ring->trb));
         xue_trb_link_set_tc(link);
     }
-
-    return 1;
 }
 
 static inline void xue_push_transfer(struct xue *xue, size_t size)
@@ -949,21 +919,23 @@ static inline void xue_set_ep_type(uint32_t *ep, uint32_t type)
  * TR dequeue ptr: physical base address of transfer ring
  * Avg TRB length: software defined (see section 4.14.1.1)
  */
-static inline void xue_dbc_init_ep(struct xue *xue, uint32_t *ep, uint32_t mbs,
+static inline void xue_dbc_init_ep(struct xue *xue, uint32_t *ep, uint64_t mbs,
                                    uint32_t type, uint64_t tr_phys)
 {
     xue->ops->mset(ep, 0, DBC_CTX_BYTES);
     xue_set_ep_type(ep, type);
 
-    ep[1] |= (1024 << 16) | (mbs << 8);
+    ep[1] |= (1024 << 16) | ((uint32_t)mbs << 8);
     ep[2] = (tr_phys & 0xFFFFFFFF) | 1;
     ep[3] = tr_phys >> 32;
     ep[4] = 3 * 1024;
 }
 
 /* Initialize the DbC info with USB string descriptor addresses */
-static inline int xue_dbc_init_info(struct xue *xue, uint32_t *info)
+static inline void xue_dbc_init_info(struct xue *xue, uint32_t *info)
 {
+    uint64_t *sda;
+
     const uint64_t st0len = 6;
     const uint64_t mfrlen = 8;
     const uint64_t prdlen = 32;
@@ -980,39 +952,25 @@ static inline int xue_dbc_init_info(struct xue *xue, uint32_t *info)
     };
     /* clang-format on */
 
-    uint64_t *sda = (uint64_t *)&info[0];
-    struct xue_string *str = &xue->dbc_strings;
+    xue->ops->mcpy((void *)xue->dbc_str, usb_str, sizeof(usb_str));
 
-    str->len = sizeof(usb_str);
-    str->buf = (char *)xue_alloc_page(xue);
-    if (!str->buf) {
-        return 0;
-    }
-
-    xue->ops->mcpy(str->buf, usb_str, str->len);
-    sda[0] = xue->ops->virt_to_phys(&str->buf[0]);
+    sda = (uint64_t *)&info[0];
+    sda[0] = xue->ops->virt_to_phys(&xue->dbc_str[0]);
     sda[1] = sda[0] + st0len;
     sda[2] = sda[0] + st0len + mfrlen;
     sda[3] = sda[0] + st0len + mfrlen + prdlen;
     info[8] = (serlen << 24) | (prdlen << 16) | (mfrlen << 8) | st0len;
-
-    return 1;
 }
 
 static inline int xue_dbc_init(struct xue *xue)
 {
-    uint32_t max_burst = 0;
-    uint64_t erdp = 0, out = 0, in = 0;
+    uint64_t erdp = 0, out = 0, in = 0, mbs = 0;
     struct xue_ops *op = xue->ops;
     struct xue_dbc_reg *reg = xue_xhc_find_dbc(xue);
-    struct xue_dbc_ctx *ctx = (struct xue_dbc_ctx *)xue_alloc_page(xue);
-    struct xue_erst_segment *erst =
-        (struct xue_erst_segment *)xue_alloc_page(xue);
 
-    if (!reg || !ctx || !erst) {
+    if (!reg) {
         return 0;
     }
-
     xue->dbc_reg = reg;
 
     xue_trb_ring_init(xue, &xue->dbc_ering, 0);
@@ -1024,75 +982,146 @@ static inline int xue_dbc_init(struct xue *xue)
         return 0;
     }
 
-    op->mset(erst, 0, sizeof(*erst));
-    erst->base = erdp;
-    erst->size = XUE_TRB_RING_SIZE;
-    xue->dbc_erst = erst;
+    op->mset(xue->dbc_erst, 0, sizeof(*xue->dbc_erst));
+    xue->dbc_erst->base = erdp;
+    xue->dbc_erst->size = XUE_TRB_RING_SIZE;
 
-    max_burst = (reg->ctrl & 0xFF0000) >> 16;
+    mbs = (reg->ctrl & 0xFF0000) >> 16;
     out = op->virt_to_phys(xue->dbc_oring.trb);
     in = op->virt_to_phys(xue->dbc_iring.trb);
 
-    op->mset(ctx, 0, sizeof(*ctx));
-    xue_dbc_init_info(xue, ctx->info);
-    xue_dbc_init_ep(xue, ctx->ep_out, max_burst, xue_ep_bulk_out, out);
-    xue_dbc_init_ep(xue, ctx->ep_in, max_burst, xue_ep_bulk_in, in);
-    xue->dbc_ctx = ctx;
+    op->mset(xue->dbc_ctx, 0, sizeof(*xue->dbc_ctx));
+    xue_dbc_init_info(xue, xue->dbc_ctx->info);
+    xue_dbc_init_ep(xue, xue->dbc_ctx->ep_out, mbs, xue_ep_bulk_out, out);
+    xue_dbc_init_ep(xue, xue->dbc_ctx->ep_in, mbs, xue_ep_bulk_in, in);
 
     reg->erstsz = 1;
-    reg->erstba = op->virt_to_phys(erst);
+    reg->erstba = op->virt_to_phys(xue->dbc_erst);
     reg->erdp = erdp;
-    reg->cp = op->virt_to_phys(ctx);
+    reg->cp = op->virt_to_phys(xue->dbc_ctx);
     reg->ddi1 = (XUE_DBC_VENDOR << 16) | XUE_DBC_PROTOCOL;
     reg->ddi2 = XUE_DBC_PRODUCT;
+
+    return 1;
+}
+
+static inline int xue_dbc_alloc(struct xue *xue)
+{
+    struct xue_ops *ops = xue->ops;
+
+    if (!ops->alloc_pages) {
+        return 1;
+    }
+
+    if (!ops->free_pages) {
+        return 0;
+    }
+
+    xue->dbc_ctx = (struct xue_dbc_ctx *)ops->alloc_pages(0);
+    if (!xue->dbc_ctx) {
+        return 0;
+    }
+
+    xue->dbc_erst = (struct xue_erst_segment *)ops->alloc_pages(0);
+    if (!xue->dbc_erst) {
+        goto free_ctx;
+    }
+
+    xue->dbc_ering.trb = (struct xue_trb *)ops->alloc_pages(XUE_TRB_RING_ORDER);
+    if (!xue->dbc_ering.trb) {
+        goto free_erst;
+    }
+
+    xue->dbc_oring.trb = (struct xue_trb *)ops->alloc_pages(XUE_TRB_RING_ORDER);
+    if (!xue->dbc_oring.trb) {
+        goto free_etrb;
+    }
+
+    xue->dbc_iring.trb = (struct xue_trb *)ops->alloc_pages(XUE_TRB_RING_ORDER);
+    if (!xue->dbc_iring.trb) {
+        goto free_otrb;
+    }
+
+    xue->dbc_owork.buf = (uint8_t *)ops->alloc_pages(XUE_WORK_RING_ORDER);
+    if (!xue->dbc_owork.buf) {
+        goto free_itrb;
+    }
+
+    xue->dbc_str = (char *)ops->alloc_pages(0);
+    if (!xue->dbc_str) {
+        goto free_owrk;
+    }
+
+    return 1;
+
+free_owrk:
+    ops->free_pages(xue->dbc_owork.buf, 0);
+free_itrb:
+    ops->free_pages(xue->dbc_iring.trb, XUE_TRB_RING_ORDER);
+free_otrb:
+    ops->free_pages(xue->dbc_oring.trb, XUE_TRB_RING_ORDER);
+free_etrb:
+    ops->free_pages(xue->dbc_ering.trb, XUE_TRB_RING_ORDER);
+free_erst:
+    ops->free_pages(xue->dbc_erst, 0);
+free_ctx:
+    ops->free_pages(xue->dbc_ctx, 0);
+
+    return 0;
+}
+
+static inline void xue_dbc_free(struct xue *xue)
+{
+    struct xue_ops *ops = xue->ops;
+    if (!ops->free_pages) {
+        return;
+    }
+
+    ops->free_pages(xue->dbc_str, 0);
+    ops->free_pages(xue->dbc_owork.buf, XUE_WORK_RING_ORDER);
+    ops->free_pages(xue->dbc_oring.trb, XUE_TRB_RING_ORDER);
+    ops->free_pages(xue->dbc_ering.trb, XUE_TRB_RING_ORDER);
+    ops->free_pages(xue->dbc_erst, 0);
+    ops->free_pages(xue->dbc_ctx, 0);
+}
+
+static inline int xue_open(struct xue *xue, struct xue_ops *ops)
+{
+    xue->ops = ops;
+
+    /* After xue_xhc_init, the xHC's MMIO is mapped in */
+    if (!xue_xhc_init(xue)) {
+        return 0;
+    }
+
+    /* After xue_dbc_alloc, every virtual address is valid */
+    if (!xue_dbc_alloc(xue)) {
+        return 0;
+    }
+
+    if (!xue_dbc_init(xue)) {
+        xue_dbc_free(xue);
+        if (ops->unmap_xhc) {
+            ops->unmap_xhc(xue->xhc_mmio);
+        }
+        return 0;
+    }
+
+    xue->dbc_owork.enq = 0;
+    xue->dbc_owork.phys = ops->virt_to_phys(xue->dbc_owork.buf);
 
     xue_dbc_enable(xue);
     return 1;
 }
 
-static inline int xue_open(struct xue *xue, struct xue_ops *ops)
-{
-    struct xue_work_ring *wrk;
-    xue->ops = ops;
-
-    if (!xue_xhc_init(xue)) {
-        return 0;
-    }
-
-    if (!xue_dbc_init(xue)) {
-        return 0;
-    }
-
-    wrk = &xue->dbc_owork;
-    wrk->buf = (uint8_t *)ops->alloc_pages(XUE_WORK_RING_ORDER);
-    if (!wrk->buf) {
-        return 0;
-    }
-
-    wrk->enq = 0;
-    wrk->phys = ops->virt_to_phys(wrk->buf);
-
-    return 1;
-}
-
 static inline void xue_close(struct xue *xue)
 {
-    struct xue_ops *op;
     xue_dbc_disable(xue);
-
-    xue_free_page(xue, xue->dbc_strings.buf);
-    xue_free_page(xue, xue->dbc_erst);
-    xue_free_page(xue, xue->dbc_ctx);
-
-    op = xue->ops;
-    op->free_pages(xue->dbc_ering.trb, XUE_TRB_RING_ORDER);
-    op->free_pages(xue->dbc_oring.trb, XUE_TRB_RING_ORDER);
-    op->free_pages(xue->dbc_iring.trb, XUE_TRB_RING_ORDER);
-    op->free_pages(xue->dbc_owork.buf, XUE_WORK_RING_ORDER);
-    op->unmap_mmio(xue->xhc_mmio);
+    xue_dbc_free(xue);
+    if (xue->ops->unmap_xhc) {
+        xue->ops->unmap_xhc(xue->xhc_mmio);
+    }
 }
-
-static inline void xue_dump(void) {}
 
 static inline int64_t xue_write(struct xue *xue, const uint8_t *data,
                                 uint64_t size)
@@ -1100,8 +1129,20 @@ static inline int64_t xue_write(struct xue *xue, const uint8_t *data,
     struct xue_ops *ops;
     struct xue_trb_ring *out;
     struct xue_work_ring *wrk;
+    struct xue_dbc_reg *reg;
 
     xue_pop_events(xue);
+
+    reg = xue->dbc_reg;
+    if (!(reg->ctrl & (1UL << CTRL_DCR_SHIFT))) {
+        return 0;
+    }
+
+    if (reg->ctrl & (1UL << CTRL_DRC_SHIFT)) {
+        reg->ctrl |= (1UL << CTRL_DRC_SHIFT);
+        reg->portsc |= (1UL << PORTSC_PED_SHIFT);
+        ops->sfence();
+    }
 
     ops = xue->ops;
     out = &xue->dbc_oring;
@@ -1132,10 +1173,18 @@ static inline int64_t xue_write(struct xue *xue, const uint8_t *data,
     }
 
 done:
-    xue->ops->sfence();
+    ops->sfence();
     xue->dbc_reg->db &= 0xFFFF00FF;
 
     return size;
+}
+
+static inline void xue_dump(struct xue *xue)
+{
+    printk("xue: ctrl: 0x%x stat: 0x%x psc: 0x%x\n",
+           xue->dbc_reg->ctrl,
+           xue->dbc_reg->st,
+           xue->dbc_reg->portsc);
 }
 
 #ifdef __cplusplus
