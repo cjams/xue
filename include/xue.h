@@ -956,6 +956,17 @@ static inline void xue_dbc_init_info(struct xue *xue, uint32_t *info)
     info[8] = (serlen << 24) | (prdlen << 16) | (mfrlen << 8) | st0len;
 }
 
+static inline void xue_dbc_reset(struct xue *xue)
+{
+    struct xue_dbc_reg *reg = xue->dbc_reg;
+
+    reg->portsc &= ~(1UL << XUE_PSC_PED);
+    xue->ops->sfence();
+    reg->ctrl &= ~(1UL << XUE_CTRL_DCE);
+    xue->ops->sfence();
+    reg->ctrl |= (1UL << XUE_CTRL_DRC);
+}
+
 static inline int xue_dbc_init(struct xue *xue)
 {
     uint64_t erdp = 0, out = 0, in = 0, mbs = 0;
@@ -965,7 +976,9 @@ static inline int xue_dbc_init(struct xue *xue)
     if (!reg) {
         return 0;
     }
+
     xue->dbc_reg = reg;
+    xue_dbc_reset(xue);
 
     xue_trb_ring_init(xue, &xue->dbc_ering, 0);
     xue_trb_ring_init(xue, &xue->dbc_oring, 1);
@@ -1111,8 +1124,7 @@ static inline int xue_open(struct xue *xue, struct xue_ops *ops)
 
 static inline void xue_close(struct xue *xue)
 {
-//    xue->dbc_reg->portsc &= ~(1UL << XUE_PSC_PED);
-    xue_dbc_disable(xue);
+    xue_dbc_reset(xue);
     xue_dbc_free(xue);
     if (xue->ops->unmap_xhc) {
         xue->ops->unmap_xhc(xue->xhc_mmio);
