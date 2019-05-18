@@ -256,7 +256,7 @@ struct xue_trb_ring {
 #define XUE_WORK_RING_SIZE (XUE_PAGE_SIZE * (1ULL << XUE_WORK_RING_ORDER))
 
 struct xue_work_ring {
-    uint8_t *buf;
+    uint8_t buf[XUE_WORK_RING_SIZE];
     uint32_t enq;
     uint64_t phys;
 };
@@ -1036,20 +1036,21 @@ static inline int xue_dbc_alloc(struct xue *xue)
         goto free_otrb;
     }
 
-    xue->dbc_owork.buf = (uint8_t *)ops->alloc_pages(XUE_WORK_RING_ORDER);
-    if (!xue->dbc_owork.buf) {
-        goto free_itrb;
-    }
+//    xue->dbc_owork.buf = (uint8_t *)ops->alloc_pages(XUE_WORK_RING_ORDER);
+//    if (!xue->dbc_owork.buf) {
+//        goto free_itrb;
+//    }
 
     xue->dbc_str = (char *)ops->alloc_pages(0);
     if (!xue->dbc_str) {
-        goto free_owrk;
+        //goto free_owrk;
+        goto free_itrb;
     }
 
     return 1;
 
-free_owrk:
-    ops->free_pages(xue->dbc_owork.buf, 0);
+//free_owrk:
+//    ops->free_pages(xue->dbc_owork.buf, 0);
 free_itrb:
     ops->free_pages(xue->dbc_iring.trb, XUE_TRB_RING_ORDER);
 free_otrb:
@@ -1072,7 +1073,7 @@ static inline void xue_dbc_free(struct xue *xue)
     }
 
     ops->free_pages(xue->dbc_str, 0);
-    ops->free_pages(xue->dbc_owork.buf, XUE_WORK_RING_ORDER);
+    //ops->free_pages(xue->dbc_owork.buf, XUE_WORK_RING_ORDER);
     ops->free_pages(xue->dbc_oring.trb, XUE_TRB_RING_ORDER);
     ops->free_pages(xue->dbc_ering.trb, XUE_TRB_RING_ORDER);
     ops->free_pages(xue->dbc_erst, 0);
