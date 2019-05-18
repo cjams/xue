@@ -99,28 +99,20 @@ extern "C" {
 #define XUE_DBC_PRODUCT 0x0010
 #define XUE_DBC_PROTOCOL 0x0000
 
-#define DBC_CTX_DWORDS 16
-#define DBC_CTX_BYTES (DBC_CTX_DWORDS * 4)
+#define XUE_CTX_SIZE 16
+#define XUE_CTX_BYTES (XUE_CTX_SIZE * 4)
 
-#define CTRL_DCR_SHIFT 0
-#define CTRL_LSE_SHIFT 1
-#define CTRL_HOT_SHIFT 2
-#define CTRL_HIT_SHIFT 3
-#define CTRL_DRC_SHIFT 4
-#define CTRL_DCE_SHIFT 31
+#define XUE_CTRL_DCR 0
+#define XUE_CTRL_HOT 2
+#define XUE_CTRL_HIT 3
+#define XUE_CTRL_DRC 4
+#define XUE_CTRL_DCE 31
 
-#define ST_ERNE_SHIFT 0
-#define ST_SBR_SHIFT 1
-
-#define PORTSC_CCS_SHIFT 0
-#define PORTSC_PED_SHIFT 1
-#define PORTSC_PR_SHIFT 4
-#define PORTSC_PLS_SHIFT 5
-#define PORTSC_CSC_SHIFT 17
-#define PORTSC_PRC_SHIFT 21
-#define PORTSC_PLC_SHIFT 22
-#define PORTSC_CEC_SHIFT 23
-#define PORTSC_PLS_MASK 0x1E0
+#define XUE_PSC_PED 1
+#define XUE_PSC_CSC 17
+#define XUE_PSC_PRC 21
+#define XUE_PSC_PLC 22
+#define XUE_PSC_CEC 23
 
 enum {
     /**
@@ -284,9 +276,9 @@ struct xue_erst_segment {
 };
 
 struct xue_dbc_ctx {
-    uint32_t info[DBC_CTX_DWORDS];
-    uint32_t ep_out[DBC_CTX_DWORDS];
-    uint32_t ep_in[DBC_CTX_DWORDS];
+    uint32_t info[XUE_CTX_SIZE];
+    uint32_t ep_out[XUE_CTX_SIZE];
+    uint32_t ep_in[XUE_CTX_SIZE];
 };
 
 struct xue_dbc_reg {
@@ -854,8 +846,8 @@ static inline void xue_pop_events(struct xue *xue)
             break;
         case xue_trb_psce: {
             uint32_t mask =
-                (1UL << PORTSC_CSC_SHIFT) | (1UL << PORTSC_PRC_SHIFT) |
-                (1UL << PORTSC_PLC_SHIFT) | (1UL << PORTSC_CEC_SHIFT);
+                (1UL << XUE_PSC_CSC) | (1UL << XUE_PSC_PRC) |
+                (1UL << XUE_PSC_PLC) | (1UL << XUE_PSC_CEC);
             uint32_t ack = mask & xue->dbc_reg->portsc;
             xue->dbc_reg->portsc |= ack;
             break;
@@ -877,17 +869,19 @@ static inline void xue_pop_events(struct xue *xue)
 
 static inline int xue_dbc_is_enabled(struct xue *xue)
 {
-    return xue->dbc_reg->ctrl & (1UL << 31);
+    return xue->dbc_reg->ctrl & (1UL << XUE_CTRL_DCE);
 }
 
 static inline void xue_dbc_enable(struct xue *xue)
 {
-    xue->dbc_reg->ctrl |= (1UL << 31);
+    xue->ops->sfence();
+    xue->dbc_reg->ctrl |= (1UL << XUE_CTRL_DCE);
 }
 
 static inline void xue_dbc_disable(struct xue *xue)
 {
-    xue->dbc_reg->ctrl &= ~(1UL << 31);
+    xue->dbc_reg->ctrl &= ~(1UL << XUE_CTRL_DCE);
+    xue->ops->sfence();
 }
 
 static inline uint32_t xue_ep_state(uint32_t *ep)
@@ -922,7 +916,7 @@ static inline void xue_set_ep_type(uint32_t *ep, uint32_t type)
 static inline void xue_dbc_init_ep(struct xue *xue, uint32_t *ep, uint64_t mbs,
                                    uint32_t type, uint64_t tr_phys)
 {
-    xue->ops->mset(ep, 0, DBC_CTX_BYTES);
+    xue->ops->mset(ep, 0, XUE_CTX_BYTES);
     xue_set_ep_type(ep, type);
 
     ep[1] |= (1024 << 16) | ((uint32_t)mbs << 8);
@@ -1116,6 +1110,7 @@ static inline int xue_open(struct xue *xue, struct xue_ops *ops)
 
 static inline void xue_close(struct xue *xue)
 {
+//    xue->dbc_reg->portsc &= ~(1UL << XUE_PSC_PED);
     xue_dbc_disable(xue);
     xue_dbc_free(xue);
     if (xue->ops->unmap_xhc) {
@@ -1134,13 +1129,13 @@ static inline int64_t xue_write(struct xue *xue, const uint8_t *data,
     xue_pop_events(xue);
 
     reg = xue->dbc_reg;
-    if (!(reg->ctrl & (1UL << CTRL_DCR_SHIFT))) {
+    if (!(reg->ctrl & (1UL << XUE_CTRL_DCR))) {
         return 0;
     }
 
-    if (reg->ctrl & (1UL << CTRL_DRC_SHIFT)) {
-        reg->ctrl |= (1UL << CTRL_DRC_SHIFT);
-        reg->portsc |= (1UL << PORTSC_PED_SHIFT);
+    if (reg->ctrl & (1UL << XUE_CTRL_DRC)) {
+        reg->ctrl |= (1UL << XUE_CTRL_DRC);
+        reg->portsc |= (1UL << XUE_PSC_PED);
         ops->sfence();
     }
 
@@ -1181,10 +1176,12 @@ done:
 
 static inline void xue_dump(struct xue *xue)
 {
+#ifdef __linux__
     printk("xue: ctrl: 0x%x stat: 0x%x psc: 0x%x\n",
            xue->dbc_reg->ctrl,
            xue->dbc_reg->st,
            xue->dbc_reg->portsc);
+#endif
 }
 
 #ifdef __cplusplus
