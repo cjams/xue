@@ -47,10 +47,12 @@ extern "C" {
 /* Linux Types                                                                */
 /* -------------------------------------------------------------------------- */
 
-#if defined(KERNEL) && defined(__linux__)
+#if defined(__linux__)
 #include <linux/printk.h>
 #include <linux/types.h>
-#define PRId64 "lld"
+#define __xuealign(a, m) m __attribute__((aligned(a)))
+#elif defined(VMM)
+#define __xuealign(a, m) m __attribute__((aligned(a)))
 #endif
 
 ///* --------------------------------------------------------------------------
@@ -256,7 +258,7 @@ struct xue_trb_ring {
 #define XUE_WORK_RING_SIZE (XUE_PAGE_SIZE * (1ULL << XUE_WORK_RING_ORDER))
 
 struct xue_work_ring {
-    uint8_t buf[XUE_WORK_RING_SIZE];
+    uint8_t *buf;
     uint32_t enq;
     uint64_t phys;
 };
@@ -788,7 +790,7 @@ static inline void xue_trb_link_dump(struct xue_trb *trb)
 static inline void xue_trb_ring_init(struct xue *xue, struct xue_trb_ring *ring,
                                      int producer)
 {
-    xue->ops->mset(ring->trb, 0, XUE_TRB_RING_SIZE * sizeof(*ring->trb));
+    xue->ops->mset(ring->trb, 0, XUE_TRB_RING_SIZE * sizeof(ring->trb[0]));
     ring->enq = 0;
     ring->deq = 0;
     ring->cyc = 1;
@@ -949,7 +951,7 @@ static inline void xue_dbc_init_info(struct xue *xue, uint32_t *info)
     xue->ops->mcpy((void *)xue->dbc_str, usb_str, sizeof(usb_str));
 
     sda = (uint64_t *)&info[0];
-    sda[0] = xue->ops->virt_to_phys(&xue->dbc_str[0]);
+    sda[0] = xue->ops->virt_to_phys(xue->dbc_str);
     sda[1] = sda[0] + st0len;
     sda[2] = sda[0] + st0len + mfrlen;
     sda[3] = sda[0] + st0len + mfrlen + prdlen;
@@ -1049,21 +1051,20 @@ static inline int xue_dbc_alloc(struct xue *xue)
         goto free_otrb;
     }
 
-//    xue->dbc_owork.buf = (uint8_t *)ops->alloc_pages(XUE_WORK_RING_ORDER);
-//    if (!xue->dbc_owork.buf) {
-//        goto free_itrb;
-//    }
+    xue->dbc_owork.buf = (uint8_t *)ops->alloc_pages(XUE_WORK_RING_ORDER);
+    if (!xue->dbc_owork.buf) {
+        goto free_itrb;
+    }
 
     xue->dbc_str = (char *)ops->alloc_pages(0);
     if (!xue->dbc_str) {
-        //goto free_owrk;
-        goto free_itrb;
+        goto free_owrk;
     }
 
     return 1;
 
-//free_owrk:
-//    ops->free_pages(xue->dbc_owork.buf, 0);
+free_owrk:
+    ops->free_pages(xue->dbc_owork.buf, 0);
 free_itrb:
     ops->free_pages(xue->dbc_iring.trb, XUE_TRB_RING_ORDER);
 free_otrb:
@@ -1086,7 +1087,8 @@ static inline void xue_dbc_free(struct xue *xue)
     }
 
     ops->free_pages(xue->dbc_str, 0);
-    //ops->free_pages(xue->dbc_owork.buf, XUE_WORK_RING_ORDER);
+    ops->free_pages(xue->dbc_owork.buf, XUE_WORK_RING_ORDER);
+    ops->free_pages(xue->dbc_iring.trb, XUE_TRB_RING_ORDER);
     ops->free_pages(xue->dbc_oring.trb, XUE_TRB_RING_ORDER);
     ops->free_pages(xue->dbc_ering.trb, XUE_TRB_RING_ORDER);
     ops->free_pages(xue->dbc_erst, 0);
@@ -1126,6 +1128,7 @@ static inline void xue_close(struct xue *xue)
 {
     xue_dbc_reset(xue);
     xue_dbc_free(xue);
+
     if (xue->ops->unmap_xhc) {
         xue->ops->unmap_xhc(xue->xhc_mmio);
     }
