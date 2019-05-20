@@ -50,9 +50,6 @@ extern "C" {
 #if defined(__linux__)
 #include <linux/printk.h>
 #include <linux/types.h>
-#define __xuealign(a, m) m __attribute__((aligned(a)))
-#elif defined(VMM)
-#define __xuealign(a, m) m __attribute__((aligned(a)))
 #endif
 
 ///* --------------------------------------------------------------------------
@@ -257,9 +254,14 @@ struct xue_trb_ring {
 #endif
 #define XUE_WORK_RING_SIZE (XUE_PAGE_SIZE * (1ULL << XUE_WORK_RING_ORDER))
 
+#if XUE_WORK_RING_SIZE > XUE_TRB_MAX_TFR
+#error "XUE_WORK_RING_ORDER must be at most 4"
+#endif
+
 struct xue_work_ring {
     uint8_t *buf;
     uint32_t enq;
+    uint32_t deq;
     uint64_t phys;
 };
 
@@ -806,14 +808,34 @@ static inline void xue_trb_ring_init(struct xue *xue, struct xue_trb_ring *ring,
     }
 }
 
-static inline void xue_push_transfer(struct xue *xue, size_t size)
+static inline int xue_trb_ring_full(struct xue_trb_ring *ring)
+{
+    return ((ring->enq + 1) & (XUE_TRB_RING_SIZE - 1)) == ring->deq;
+}
+
+static inline int xue_work_ring_full(struct xue_work_ring *ring)
+{
+    return ((ring->enq + 1) & (XUE_WORK_RING_SIZE - 1)) == ring->deq;
+}
+
+static inline int64_t xue_push_work(struct xue_work_ring *ring,
+                                    const char *buf, int64_t size)
+{
+    int64_t i = 0;
+
+    while (!xue_work_ring_full(ring) && i < size) {
+        ring->buf[ring->enq] = buf[i++];
+        ring->enq = (ring->enq + 1) & (XUE_WORK_RING_SIZE - 1);
+    }
+
+    return i;
+}
+
+static inline void xue_push_out(struct xue *xue, uint64_t out_dma,
+                                uint64_t out_size)
 {
     struct xue_trb trb;
-    struct xue_trb_ring *out;
-    struct xue_work_ring *wrk;
-
-    out = &xue->dbc_oring;
-    wrk = &xue->dbc_owork;
+    struct xue_trb_ring *out = &xue->dbc_oring;
 
     if (out->enq == XUE_TRB_RING_SIZE - 1) {
         out->enq = 0;
@@ -824,8 +846,8 @@ static inline void xue_push_transfer(struct xue *xue, size_t size)
     xue_trb_set_type(&trb, xue_trb_norm);
     xue_trb_set_cyc(&trb, out->cyc);
 
-    xue_trb_norm_set_buf(&trb, wrk->phys + wrk->enq);
-    xue_trb_norm_set_len(&trb, size);
+    xue_trb_norm_set_buf(&trb, out_dma);
+    xue_trb_norm_set_len(&trb, out_size);
     xue_trb_norm_set_ioc(&trb);
 
     out->trb[out->enq++] = trb;
@@ -1118,6 +1140,7 @@ static inline int xue_open(struct xue *xue, struct xue_ops *ops)
     }
 
     xue->dbc_owork.enq = 0;
+    xue->dbc_owork.deq = 0;
     xue->dbc_owork.phys = ops->virt_to_phys(xue->dbc_owork.buf);
 
     xue_dbc_enable(xue);
@@ -1134,60 +1157,52 @@ static inline void xue_close(struct xue *xue)
     }
 }
 
-static inline int64_t xue_write(struct xue *xue, const uint8_t *data,
+static inline int64_t xue_write(struct xue *xue, const char *buf,
                                 uint64_t size)
 {
-    struct xue_ops *ops;
-    struct xue_trb_ring *out;
-    struct xue_work_ring *wrk;
-    struct xue_dbc_reg *reg;
+    int64_t ret;
+
+    struct xue_dbc_reg *reg = xue->dbc_reg;
+    struct xue_trb_ring *out = &xue->dbc_oring;
+    struct xue_work_ring *wrk = &xue->dbc_owork;
 
     xue_pop_events(xue);
 
-    reg = xue->dbc_reg;
-    if (!(reg->ctrl & (1UL << XUE_CTRL_DCR))) {
+    if (!buf || size <= 0) {
         return 0;
+    }
+
+    ret = xue_push_work(wrk, buf, size);
+    if (!(reg->ctrl & (1UL << XUE_CTRL_DCR))) {
+        return ret;
     }
 
     if (reg->ctrl & (1UL << XUE_CTRL_DRC)) {
         reg->ctrl |= (1UL << XUE_CTRL_DRC);
         reg->portsc |= (1UL << XUE_PSC_PED);
-        ops->sfence();
+        xue->ops->sfence();
     }
 
-    ops = xue->ops;
-    out = &xue->dbc_oring;
-    wrk = &xue->dbc_owork;
-    if (((out->enq + 1) & (XUE_TRB_RING_SIZE - 1)) == out->deq) {
-        return 0;
+    if (xue_trb_ring_full(out)) {
+        return ret;
     }
 
-    size = (size > XUE_WORK_RING_SIZE) ? XUE_WORK_RING_SIZE : size;
-    size = (size > XUE_TRB_MAX_TFR) ? XUE_TRB_MAX_TFR : size;
-    if (size <= XUE_WORK_RING_SIZE - wrk->enq) {
-        xue_push_transfer(xue, size);
-        ops->mcpy(&wrk->buf[wrk->enq], data, size);
-        wrk->enq += size;
+    if (wrk->enq > wrk->deq) {
+        xue_push_out(xue, wrk->phys + wrk->deq, wrk->enq - wrk->deq);
+        wrk->deq = wrk->enq;
     } else {
-        uint64_t nr = XUE_WORK_RING_SIZE - wrk->enq;
-        xue_push_transfer(xue, nr);
-        ops->mcpy(&wrk->buf[wrk->enq], data, nr);
-        wrk->enq = 0;
-        if (((out->enq + 1) & (XUE_TRB_RING_SIZE - 1)) == out->deq) {
-            size = nr;
-            goto done;
+        xue_push_out(xue, wrk->phys + wrk->deq, XUE_WORK_RING_SIZE - wrk->deq);
+        wrk->deq = 0;
+        if (wrk->enq > 0 && !xue_trb_ring_full(out)) {
+            xue_push_out(xue, wrk->phys, wrk->enq);
+            wrk->deq = wrk->enq;
         }
-
-        xue_push_transfer(xue, size - nr);
-        ops->mcpy(&wrk->buf[wrk->enq], data + nr, size - nr);
-        wrk->enq = size - nr;
     }
 
-done:
-    ops->sfence();
+    xue->ops->sfence();
     xue->dbc_reg->db &= 0xFFFF00FF;
 
-    return size;
+    return ret;
 }
 
 static inline void xue_dump(struct xue *xue)
