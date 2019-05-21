@@ -819,7 +819,7 @@ static inline int xue_work_ring_full(const struct xue_work_ring *ring)
     return ((ring->enq + 1) & (XUE_WORK_RING_CAP - 1)) == ring->deq;
 }
 
-static inline int xue_work_ring_size(const struct xue_work_ring *ring)
+static inline uint64_t xue_work_ring_size(const struct xue_work_ring *ring)
 {
     if (ring->enq >= ring->deq) {
         return ring->enq - ring->deq;
@@ -828,39 +828,38 @@ static inline int xue_work_ring_size(const struct xue_work_ring *ring)
     return XUE_WORK_RING_CAP - ring->deq + ring->enq;
 }
 
+static inline void xue_push_trb(struct xue_trb_ring *ring, uint64_t dma,
+                                uint64_t len)
+{
+    struct xue_trb trb;
+
+    if (ring->enq == XUE_TRB_RING_CAP - 1) {
+        ring->enq = 0;
+        ring->cyc ^= 1;
+    }
+
+    xue_trb_init(&trb);
+    xue_trb_set_type(&trb, xue_trb_norm);
+    xue_trb_set_cyc(&trb, ring->cyc);
+
+    xue_trb_norm_set_buf(&trb, dma);
+    xue_trb_norm_set_len(&trb, len);
+    xue_trb_norm_set_ioc(&trb);
+
+    ring->trb[ring->enq++] = trb;
+}
+
 static inline int64_t xue_push_work(struct xue_work_ring *ring,
-                                    const char *buf, int64_t size)
+                                    const char *buf, int64_t len)
 {
     int64_t i = 0;
 
-    while (!xue_work_ring_full(ring) && i < size) {
+    while (!xue_work_ring_full(ring) && i < len) {
         ring->buf[ring->enq] = buf[i++];
         ring->enq = (ring->enq + 1) & (XUE_WORK_RING_CAP - 1);
     }
 
     return i;
-}
-
-static inline void xue_push_out(struct xue *xue, uint64_t out_dma,
-                                uint64_t out_size)
-{
-    struct xue_trb trb;
-    struct xue_trb_ring *out = &xue->dbc_oring;
-
-    if (out->enq == XUE_TRB_RING_CAP - 1) {
-        out->enq = 0;
-        out->cyc ^= 1;
-    }
-
-    xue_trb_init(&trb);
-    xue_trb_set_type(&trb, xue_trb_norm);
-    xue_trb_set_cyc(&trb, out->cyc);
-
-    xue_trb_norm_set_buf(&trb, out_dma);
-    xue_trb_norm_set_len(&trb, out_size);
-    xue_trb_norm_set_ioc(&trb);
-
-    out->trb[out->enq++] = trb;
 }
 
 static inline void xue_pop_events(struct xue *xue)
@@ -900,6 +899,7 @@ static inline void xue_pop_events(struct xue *xue)
     xue->ops->sfence();
     xue->dbc_reg->erdp = erdp;
 }
+
 
 static inline int xue_dbc_is_enabled(struct xue *xue)
 {
@@ -1157,34 +1157,16 @@ static inline int xue_open(struct xue *xue, struct xue_ops *ops)
     return 1;
 }
 
-static inline void xue_close(struct xue *xue)
+static inline void xue_flush(struct xue *xue)
 {
-    xue_dbc_reset(xue);
-    xue_dbc_free(xue);
-
-    if (xue->ops->unmap_xhc) {
-        xue->ops->unmap_xhc(xue->xhc_mmio);
-    }
-}
-
-static inline int64_t xue_write(struct xue *xue, const char *buf,
-                                uint64_t size)
-{
-    int64_t ret;
-
     struct xue_dbc_reg *reg = xue->dbc_reg;
     struct xue_trb_ring *out = &xue->dbc_oring;
     struct xue_work_ring *wrk = &xue->dbc_owork;
 
     xue_pop_events(xue);
 
-    if (!buf || size <= 0) {
-        return 0;
-    }
-
-    ret = xue_push_work(wrk, buf, size);
     if (!(reg->ctrl & (1UL << XUE_CTRL_DCR))) {
-        return ret;
+        return;
     }
 
     if (reg->ctrl & (1UL << XUE_CTRL_DRC)) {
@@ -1193,30 +1175,55 @@ static inline int64_t xue_write(struct xue *xue, const char *buf,
         xue->ops->sfence();
     }
 
-    if (size == 1 && !(*buf == '\n' || *buf == '\r' || *buf == 0)) {
-        return ret;
-    }
-
     if (xue_trb_ring_full(out)) {
-        return ret;
+        return;
     }
 
     if (wrk->enq > wrk->deq) {
-        xue_push_out(xue, wrk->phys + wrk->deq, wrk->enq - wrk->deq);
+        xue_push_trb(out, wrk->phys + wrk->deq, wrk->enq - wrk->deq);
         wrk->deq = wrk->enq;
     } else {
-        xue_push_out(xue, wrk->phys + wrk->deq, XUE_WORK_RING_CAP - wrk->deq);
+        xue_push_trb(out, wrk->phys + wrk->deq, XUE_WORK_RING_CAP - wrk->deq);
         wrk->deq = 0;
         if (wrk->enq > 0 && !xue_trb_ring_full(out)) {
-            xue_push_out(xue, wrk->phys, wrk->enq);
+            xue_push_trb(out, wrk->phys, wrk->enq);
             wrk->deq = wrk->enq;
         }
     }
 
     xue->ops->sfence();
     xue->dbc_reg->db &= 0xFFFF00FF;
+}
 
+static inline int64_t xue_write(struct xue *xue, const char *buf,
+                                uint64_t size)
+{
+    int64_t ret;
+
+    if (!buf || size <= 0) {
+        return 0;
+    }
+
+    ret = xue_push_work(&xue->dbc_owork, buf, size);
+    if (!ret) {
+        return 0;
+    }
+
+    xue_flush(xue);
     return ret;
+}
+
+static inline int64_t xue_putc(struct xue *xue, char c)
+{
+    if (!xue_push_work(&xue->dbc_owork, &c, 1)) {
+        return 0;
+    }
+
+    if (c == '\n') {
+        xue_flush(xue);
+    }
+
+    return 1;
 }
 
 static inline void xue_dump(struct xue *xue)
@@ -1227,6 +1234,16 @@ static inline void xue_dump(struct xue *xue)
            xue->dbc_reg->st,
            xue->dbc_reg->portsc);
 #endif
+}
+
+static inline void xue_close(struct xue *xue)
+{
+    xue_dbc_reset(xue);
+    xue_dbc_free(xue);
+
+    if (xue->ops->unmap_xhc) {
+        xue->ops->unmap_xhc(xue->xhc_mmio);
+    }
 }
 
 #ifdef __cplusplus
