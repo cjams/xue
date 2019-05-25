@@ -113,6 +113,10 @@ extern "C" {
 #define XUE_PSC_PLC 22
 #define XUE_PSC_CEC 23
 
+#define XUE_PSC_ACK_MASK \
+    ((1UL << XUE_PSC_CSC) | (1UL << XUE_PSC_PRC) | \
+     (1UL << XUE_PSC_PLC) | (1UL << XUE_PSC_CEC))
+
 enum {
     /**
      * State after a hardware reset or assertion of HCRST. This state
@@ -177,36 +181,9 @@ enum {
     xue_dbc_error
 };
 
+enum { xue_trb_norm = 1, xue_trb_tfre = 32, xue_trb_psce = 34 };
 enum { xue_trb_cc_success = 1, xue_trb_cc_trb_err = 5 };
-
-enum {
-    xue_trb_norm = 1,
-    xue_trb_link = 6,
-    xue_trb_tfre = 32,
-    xue_trb_psce = 34
-};
-
-enum {
-    xue_ep_disabled,
-    xue_ep_running,
-    xue_ep_halted,
-    xue_ep_stopped,
-    xue_ep_error,
-    xue_ep_rsvd5,
-    xue_ep_rsvd6,
-    xue_ep_rsvd7
-};
-
-enum {
-    xue_ep_not_valid,
-    xue_ep_isoch_out,
-    xue_ep_bulk_out,
-    xue_ep_intr_out,
-    xue_ep_ctrl,
-    xue_ep_isoch_in,
-    xue_ep_bulk_in,
-    xue_ep_intr_in
-};
+enum { xue_ep_bulk_out = 2, xue_ep_bulk_in = 6 };
 
 /******************************************************************************
  * TRB ring
@@ -532,19 +509,6 @@ static inline struct xue_dbc_reg *xue_xhc_find_dbc(struct xue *xue)
 }
 
 /**
- * Transfer request blocks (TRBs) are the basic blocks on which all DbC
- * transactions occur. Each TRB is 16 bytes. There are several different types
- * of TRBs, each with their own interpretation of the 16 bytes and their own
- * rules of use.
- */
-static inline void xue_trb_init(struct xue_trb *trb)
-{
-    trb->params = 0;
-    trb->status = 0;
-    trb->ctrl = 0;
-}
-
-/**
  * Fields with the same interpretation for every TRB type (section 4.11.1).
  * These are the fields defined in the TRB template, minus the ENT bit. That
  * bit is the toggle cycle bit in link TRBs, so it shouldn't be in the
@@ -655,20 +619,6 @@ static inline void xue_trb_norm_clear_ioc(struct xue_trb *trb)
     trb->ctrl &= ~0x20UL;
 }
 
-static inline void xue_trb_norm_dump(struct xue_trb *trb)
-{
-    //    printf("normal    trb: cyc: %d type: %d buf: 0x%llx tgt: %u ",
-    //           xue_trb_cyc(trb), xue_trb_type(trb), xue_trb_norm_buf(trb),
-    //           xue_trb_norm_inttgt(trb));
-    //    printf("tdsz: %u len: %u bei: %u idt: %u ioc: %u ch: %u ns: %u ",
-    //           xue_trb_norm_tdsz(trb), xue_trb_norm_len(trb),
-    //           xue_trb_norm_bei(trb), xue_trb_norm_idt(trb),
-    //           xue_trb_norm_ioc(trb), xue_trb_norm_ch(trb),
-    //           xue_trb_norm_ns(trb));
-    //    printf("isp: %u ent: %u\n", xue_trb_norm_isp(trb),
-    //    xue_trb_norm_ent(trb));
-}
-
 /**
  * Fields for Transfer Event TRBs (see section 6.4.2.1). Note that event
  * TRBs are read-only from software
@@ -705,17 +655,6 @@ static inline uint32_t xue_trb_tfre_ed(struct xue_trb *trb)
     return (trb->ctrl & 0x4) >> 2;
 }
 
-static inline void xue_trb_tfre_dump(struct xue_trb *trb)
-{
-    //    printf("tfr event trb: cyc: %d type: %d trbptr: 0x%llx code: %u ",
-    //           trb_cyc(trb), trb_type(trb), xue_trb_tfre_ptr(trb),
-    //           xue_trb_tfre_cc(trb));
-    //
-    //    printf("tfrlen: %u slotid: %u endpointid: %u ed: %u\n",
-    //           xue_trb_tfre_tfrlen(trb), xue_trb_tfre_slotid(trb),
-    //           xue_trb_tfre_epid(trb), xue_trb_tfre_ed(trb));
-}
-
 /* Fields for Port Status Change Event TRBs (see section 6.4.2.3) */
 static inline uint32_t xue_trb_psce_portid(struct xue_trb *trb)
 {
@@ -725,13 +664,6 @@ static inline uint32_t xue_trb_psce_portid(struct xue_trb *trb)
 static inline uint32_t xue_trb_psce_cc(struct xue_trb *trb)
 {
     return trb->status >> 24;
-}
-
-static inline void xue_trb_psce_dump(struct xue_trb *trb)
-{
-    //    printf("psc event trb: cyc: %d type: %d portid: %u code: %u\n",
-    //           xue_trb_cyc(trb), xue_trb_type(trb),
-    //           xue_trb_psce_portid(trb), xue_trb_psce_cc(trb));
 }
 
 /* Fields for link TRBs (section 6.4.4.1) */
@@ -785,15 +717,6 @@ static inline void xue_trb_link_clear_ioc(struct xue_trb *trb)
     trb->ctrl &= ~0x20UL;
 }
 
-static inline void xue_trb_link_dump(struct xue_trb *trb)
-{
-    //    printf("link      trb: cyc: %d type: %d rsp: 0x%llx tgt: %u ",
-    //           xue_trb_cyc(trb), xue_trb_type(trb), xue_trb_link_rsp(trb),
-    //           xue_trb_link_inttgt(trb));
-    //    printf("ioc: %u ch: %u tc: %u ", xue_trb_link_ioc(trb),
-    //           xue_trb_link_ch(trb), xue_trb_link_tc(trb));
-}
-
 static inline void xue_trb_ring_init(struct xue *xue, struct xue_trb_ring *ring,
                                      int producer)
 {
@@ -843,7 +766,10 @@ static inline void xue_push_trb(struct xue_trb_ring *ring, uint64_t dma,
         ring->cyc ^= 1;
     }
 
-    xue_trb_init(&trb);
+    trb.params = 0;
+    trb.status = 0;
+    trb.ctrl = 0;
+
     xue_trb_set_type(&trb, xue_trb_norm);
     xue_trb_set_cyc(&trb, ring->cyc);
 
@@ -882,14 +808,9 @@ static inline void xue_pop_events(struct xue *xue)
             }
             tr->deq = (xue_trb_tfre_ptr(event) & 0xFFF) >> sizeof(*event);
             break;
-        case xue_trb_psce: {
-            uint32_t mask =
-                (1UL << XUE_PSC_CSC) | (1UL << XUE_PSC_PRC) |
-                (1UL << XUE_PSC_PLC) | (1UL << XUE_PSC_CEC);
-            uint32_t ack = mask & xue->dbc_reg->portsc;
-            xue->dbc_reg->portsc |= ack;
+        case xue_trb_psce:
+            xue->dbc_reg->portsc |= (XUE_PSC_ACK_MASK & xue->dbc_reg->portsc);
             break;
-        }
         default:
             break;
         }
@@ -952,7 +873,7 @@ static inline void xue_set_ep_type(uint32_t *ep, uint32_t type)
  * TR dequeue ptr: physical base address of transfer ring
  * Avg TRB length: software defined (see section 4.14.1.1)
  */
-static inline void xue_dbc_init_ep(struct xue *xue, uint32_t *ep, uint64_t mbs,
+static inline void xue_dbc_init_ep(uint32_t *ep, uint64_t mbs,
                                    uint32_t type, uint64_t tr_phys)
 {
     xue_mset(ep, 0, XUE_CTX_BYTES);
@@ -1038,8 +959,8 @@ static inline int xue_dbc_init(struct xue *xue)
 
     xue_mset(xue->dbc_ctx, 0, sizeof(*xue->dbc_ctx));
     xue_dbc_init_info(xue, xue->dbc_ctx->info);
-    xue_dbc_init_ep(xue, xue->dbc_ctx->ep_out, mbs, xue_ep_bulk_out, out);
-    xue_dbc_init_ep(xue, xue->dbc_ctx->ep_in, mbs, xue_ep_bulk_in, in);
+    xue_dbc_init_ep(xue->dbc_ctx->ep_out, mbs, xue_ep_bulk_out, out);
+    xue_dbc_init_ep(xue->dbc_ctx->ep_in, mbs, xue_ep_bulk_in, in);
 
     reg->erstsz = 1;
     reg->erstba = op->virt_to_phys(xue->dbc_erst);
