@@ -47,7 +47,7 @@ extern "C" {
 /* Linux Types                                                                */
 /* -------------------------------------------------------------------------- */
 
-#if defined(__linux__)
+#if defined(__linux__) && !defined(__XEN__)
 #include <linux/printk.h>
 #include <linux/types.h>
 #endif
