@@ -411,6 +411,18 @@ static inline void xue_xhc_write(struct xue *xue, uint32_t cf8, uint32_t reg,
     xue->ops->outd(0xCFC, val);
 }
 
+static inline void __xue_uart_putc(char c)
+{
+    __asm volatile(
+        "movq $0x3f8, %%rdx\n\t"
+        "movq %0, %%rax\n\t"
+        "outb %%al, %%dx\n\t"
+        :
+        : "g"(c)
+        : "cc"
+    );
+}
+
 static inline int xue_xhc_init(struct xue *xue)
 {
     uint32_t bar0;
@@ -977,6 +989,7 @@ static inline int xue_dbc_alloc(struct xue *xue)
     struct xue_ops *ops = xue->ops;
 
     if (!ops->alloc_pages) {
+        ops->free_pages = NULL;
         return 1;
     }
 
@@ -1154,11 +1167,20 @@ static inline int64_t xue_putc(struct xue *xue, char c)
 
 static inline void xue_dump(struct xue *xue)
 {
-#ifdef __linux__
-    printk("xue: ctrl: 0x%x stat: 0x%x psc: 0x%x\n",
+#if defined(__linux__) || defined(__XEN__)
+    printk("XUE DUMP:\n");
+    printk("    ctrl: 0x%x stat: 0x%x psc: 0x%x\n",
            xue->dbc_reg->ctrl,
            xue->dbc_reg->st,
            xue->dbc_reg->portsc);
+
+    printk("    id: 0x%x, db: 0x%x\n", xue->dbc_reg->id, xue->dbc_reg->db);
+    printk("    erstsz: %u, erstba: 0x%lx\n", xue->dbc_reg->erstsz, xue->dbc_reg->erstba);
+    printk("    erdp: 0x%lx, cp: 0x%lx\n", xue->dbc_reg->erdp, xue->dbc_reg->cp);
+    printk("    ddi1: 0x%x, ddi2: 0x%x\n", xue->dbc_reg->ddi1, xue->dbc_reg->ddi2);
+    printk("    erstba == virt_to_phys(erst): %d\n", xue->dbc_reg->erstba == xue->ops->virt_to_phys(xue->dbc_erst));
+    printk("    erdp == virt_to_phys(erst[0].base): %d\n", xue->dbc_reg->erdp == xue->dbc_erst[0].base);
+    printk("    cp == virt_to_phys(ctx): %d\n", xue->dbc_reg->cp == xue->ops->virt_to_phys(xue->dbc_ctx));
 #endif
 }
 
