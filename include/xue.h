@@ -87,14 +87,15 @@ extern "C" {
 
 #define XUE_PAGE_SIZE 4096
 
-/* xHC PCI config */
+/* xHC PCI vendor/device IDs */
 #define XUE_XHC_CLASSC 0xC0330
 #define XUE_XHC_VEN_INTEL 0x8086
-#define XUE_XHC_DEV_SKYLK 0xA2AF
-#define XUE_XHC_DEV_CANLK 0xA36D
+#define XUE_XHC_DEV_WILDCAT_POINT 0x9CB1
+#define XUE_XHC_DEV_Z370 0xA2AF
+#define XUE_XHC_DEV_Z390 0xA36D
 
 /* USB configurations */
-#define XUE_HOST_WIN10
+//#define XUE_HOST_WIN10
 
 #if defined(XUE_HOST_WIN10)
 #define XUE_DBC_VENDOR 0x3495
@@ -446,8 +447,9 @@ static inline int xue_xhc_init(struct xue *xue)
         uint32_t hdr = (xue_xhc_read(xue, cf8, 3) & 0xFF0000U) >> 16;
 
         switch (xue_xhc_read(xue, cf8, 0)) {
-        case (XUE_XHC_DEV_SKYLK << 16) | XUE_XHC_VEN_INTEL:
-        case (XUE_XHC_DEV_CANLK << 16) | XUE_XHC_VEN_INTEL:
+        case (XUE_XHC_DEV_Z370 << 16) | XUE_XHC_VEN_INTEL:
+        case (XUE_XHC_DEV_Z390 << 16) | XUE_XHC_VEN_INTEL:
+        case (XUE_XHC_DEV_WILDCAT_POINT << 16) | XUE_XHC_VEN_INTEL:
             break;
         default:
             continue;
