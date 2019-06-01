@@ -1,5 +1,4 @@
 #!/usr/bin/python
-#
 # Copyright (C) 2019 Assured Information Security, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -21,6 +20,11 @@
 # SOFTWARE.
 
 import usb.core
+import platform
+import string
+import time
+import glob
+import os
 
 DBC_VEND = 0x1D6B
 DBC_PROD = 0x0010
@@ -29,23 +33,29 @@ DBC_EP_IN = 0x81
 DBC_EP_OUT = 0x01
 DBC_READ_SIZE = 0x40
 
-# Find the DbC device
-dbc = usb.core.find(idVendor=DBC_VEND, idProduct=DBC_PROD)
-if dbc is None:
-    raise ValueError('DbC not found')
-
-# Unbind any kernel driver if necessary
-#if dbc.is_kernel_driver_active(DBC_IFACE):
-#    dbc.detach_kernel_driver(DBC_IFACE)
-
-# Set the configuration
-dbc.set_configuration()
-
-# Read from the DbC
 while 1:
-    try:
-        data = dbc.read(DBC_EP_IN, DBC_READ_SIZE)
-        for c in data:
-            print(chr(c), end='')
-    except usb.core.USBError:
-        pass
+    dbc = usb.core.find(idVendor=DBC_VEND, idProduct=DBC_PROD)
+    if dbc is None:
+        time.sleep(0.01)
+    else:
+        break
+
+if platform.system() == 'Linux':
+    if not dbc.is_kernel_driver_active(DBC_IFACE):
+        raise ValueError('Failed to bind usb_debug to DbC device')
+    else:
+        dbc_glob = str(dbc.bus) + '-[0-9].*'
+        dbc_path = glob.glob('/sys/bus/usb/drivers/usb_debug/' + dbc_glob)[0]
+        dbc_char = glob.glob(dbc_path + '/ttyUSB[0-9]')[0]
+        dbc_tty = '/dev/' + dbc_char.split('/')[-1]
+        os.system('cat < ' + dbc_tty)
+
+elif platform.system() == 'Windows':
+    dbc.set_configuration()
+    while 1:
+        try:
+            data = dbc.read(DBC_EP_IN, DBC_READ_SIZE)
+            for c in data:
+                print(chr(c), end='')
+        except usb.core.USBError:
+            pass
