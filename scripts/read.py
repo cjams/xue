@@ -1,5 +1,4 @@
 #!/usr/bin/python
-
 #
 # Copyright (C) 2019 Assured Information Security, Inc.
 #
@@ -23,10 +22,11 @@
 
 import usb.core
 
-DBC_VEND = 0x3495
-DBC_PROD = 0x00E0
+DBC_VEND = 0x1D6B
+DBC_PROD = 0x0010
 DBC_IFACE = 0x00
 DBC_EP_IN = 0x81
+DBC_EP_OUT = 0x01
 DBC_READ_SIZE = 0x40
 
 # Find the DbC device
@@ -46,6 +46,6 @@ while 1:
     try:
         data = dbc.read(DBC_EP_IN, DBC_READ_SIZE)
         for c in data:
-            print(chr(c), end="")
+            print(chr(c), end='')
     except usb.core.USBError:
         pass

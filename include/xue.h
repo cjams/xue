@@ -94,17 +94,9 @@ extern "C" {
 #define XUE_XHC_DEV_Z370 0xA2AF
 #define XUE_XHC_DEV_Z390 0xA36D
 
-/* USB configurations */
-//#define XUE_HOST_WIN10
-
-#if defined(XUE_HOST_WIN10)
-#define XUE_DBC_VENDOR 0x3495
-#define XUE_DBC_PRODUCT 0x00E0
-#else /* assume Linux host if not Windows */
+/* DBC idVendor and idProduct */
 #define XUE_DBC_VENDOR 0x1D6B
 #define XUE_DBC_PRODUCT 0x0010
-#endif
-
 #define XUE_DBC_PROTOCOL 0x0000
 
 #define XUE_CTX_SIZE 16
