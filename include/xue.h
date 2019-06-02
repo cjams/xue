@@ -87,10 +87,12 @@ extern "C" {
 
 #define XUE_PAGE_SIZE 4096
 
-/* xHC PCI vendor/device IDs */
+/* Supported xHC PCI configurations */
 #define XUE_XHC_CLASSC 0xC0330
 #define XUE_XHC_VEN_INTEL 0x8086
+
 #define XUE_XHC_DEV_WILDCAT_POINT 0x9CB1
+#define XUE_XHC_DEV_SUNRISE_POINT 0x9D2F
 #define XUE_XHC_DEV_Z370 0xA2AF
 #define XUE_XHC_DEV_Z390 0xA36D
 
@@ -442,6 +444,7 @@ static inline int xue_xhc_init(struct xue *xue)
         case (XUE_XHC_DEV_Z370 << 16) | XUE_XHC_VEN_INTEL:
         case (XUE_XHC_DEV_Z390 << 16) | XUE_XHC_VEN_INTEL:
         case (XUE_XHC_DEV_WILDCAT_POINT << 16) | XUE_XHC_VEN_INTEL:
+        case (XUE_XHC_DEV_SUNRISE_POINT << 16) | XUE_XHC_VEN_INTEL:
             break;
         default:
             continue;
@@ -1177,8 +1180,8 @@ static inline void xue_dump(struct xue *xue)
            xue->dbc_reg->portsc);
 
     printk("    id: 0x%x, db: 0x%x\n", xue->dbc_reg->id, xue->dbc_reg->db);
-    printk("    erstsz: %u, erstba: 0x%lx\n", xue->dbc_reg->erstsz, xue->dbc_reg->erstba);
-    printk("    erdp: 0x%lx, cp: 0x%lx\n", xue->dbc_reg->erdp, xue->dbc_reg->cp);
+    printk("    erstsz: %u, erstba: 0x%llx\n", xue->dbc_reg->erstsz, xue->dbc_reg->erstba);
+    printk("    erdp: 0x%llx, cp: 0x%llx\n", xue->dbc_reg->erdp, xue->dbc_reg->cp);
     printk("    ddi1: 0x%x, ddi2: 0x%x\n", xue->dbc_reg->ddi1, xue->dbc_reg->ddi2);
     printk("    erstba == virt_to_phys(erst): %d\n", xue->dbc_reg->erstba == xue->ops->virt_to_phys(xue->dbc_erst));
     printk("    erdp == virt_to_phys(erst[0].base): %d\n", xue->dbc_reg->erdp == xue->dbc_erst[0].base);
