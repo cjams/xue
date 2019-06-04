@@ -52,27 +52,25 @@ extern "C" {
 #include <linux/types.h>
 #endif
 
-///* --------------------------------------------------------------------------
-///*/
-///* Windows Types */
-///* --------------------------------------------------------------------------
-///*/
-//
-//#if defined(_WIN32)
-//#include <basetsd.h>
-// typedef INT8 int8_t;
-// typedef INT16 int16_t;
-// typedef INT32 int32_t;
-// typedef INT64 int64_t;
-// typedef UINT8 uint8_t;
-// typedef UINT16 uint16_t;
-// typedef UINT32 uint32_t;
-// typedef UINT64 uint64_t;
-// typedef UINT_PTR uintptr_t;
-// typedef INT_PTR intptr_t;
-//#define PRId64 "lld"
-//#endif
-//
+/* -------------------------------------------------------------------------- */
+/* Windows Types                                                              */
+/* -------------------------------------------------------------------------- */
+
+#if defined(_WIN32)
+#include <basetsd.h>
+typedef INT8 int8_t;
+typedef INT16 int16_t;
+typedef INT32 int32_t;
+typedef INT64 int64_t;
+typedef UINT8 uint8_t;
+typedef UINT16 uint16_t;
+typedef UINT32 uint32_t;
+typedef UINT64 uint64_t;
+typedef UINT_PTR uintptr_t;
+typedef INT_PTR intptr_t;
+#define PRId64 "lld"
+#endif
+
 ///* --------------------------------------------------------------------------
 ///*/
 ///* EFI Types */
@@ -414,17 +412,17 @@ static inline void xue_xhc_write(struct xue *xue, uint32_t cf8, uint32_t reg,
     xue->ops->outd(0xCFC, val);
 }
 
-static inline void __xue_uart_putc(char c)
-{
-    __asm volatile(
-        "movq $0x3f8, %%rdx\n\t"
-        "movq %0, %%rax\n\t"
-        "outb %%al, %%dx\n\t"
-        :
-        : "g"(c)
-        : "cc"
-    );
-}
+//static inline void __xue_uart_putc(char c)
+//{
+//    __asm volatile(
+//        "movq $0x3f8, %%rdx\n\t"
+//        "movq %0, %%rax\n\t"
+//        "outb %%al, %%dx\n\t"
+//        :
+//        : "g"(c)
+//        : "cc"
+//    );
+//}
 
 static inline int xue_xhc_init(struct xue *xue)
 {
@@ -791,7 +789,7 @@ static inline void xue_push_trb(struct xue_trb_ring *ring, uint64_t dma,
     xue_trb_set_cyc(&trb, ring->cyc);
 
     xue_trb_norm_set_buf(&trb, dma);
-    xue_trb_norm_set_len(&trb, len);
+    xue_trb_norm_set_len(&trb, (uint32_t)len);
     xue_trb_norm_set_ioc(&trb);
 
     ring->trb[ring->enq++] = trb;
@@ -907,19 +905,14 @@ static inline void xue_dbc_init_info(struct xue *xue, uint32_t *info)
 {
     uint64_t *sda;
 
-    const uint64_t st0len = 6;
-    const uint64_t mfrlen = 8;
-    const uint64_t prdlen = 32;
-    const uint64_t serlen = 4;
-
     /* clang-format off */
     const char usb_str[] = {
-        (char)st0len, 3, 9, 0, 4, 0,
-        (char)mfrlen, 3, 'A', 0, 'I', 0, 'S', 0,
-        (char)prdlen, 3, 'x', 0, 'H', 0, 'C', 0, 'I', 0, ' ', 0,
-                         'D', 0, 'b', 0, 'C', 0, ' ', 0,
-                         'D', 0, 'r', 0, 'i', 0, 'v', 0, 'e', 0, 'r', 0,
-        (char)serlen, 3, '0', 0
+        6,  3, 9, 0, 4, 0,
+        8,  3, 'A', 0, 'I', 0, 'S', 0,
+        32, 3, 'x', 0, 'H', 0, 'C', 0, 'I', 0, ' ', 0,
+               'D', 0, 'b', 0, 'C', 0, ' ', 0,
+               'D', 0, 'r', 0, 'i', 0, 'v', 0, 'e', 0, 'r', 0,
+        4, 3, '0', 0
     };
     /* clang-format on */
 
@@ -927,10 +920,10 @@ static inline void xue_dbc_init_info(struct xue *xue, uint32_t *info)
 
     sda = (uint64_t *)&info[0];
     sda[0] = xue->ops->virt_to_phys(xue->dbc_str);
-    sda[1] = sda[0] + st0len;
-    sda[2] = sda[0] + st0len + mfrlen;
-    sda[3] = sda[0] + st0len + mfrlen + prdlen;
-    info[8] = (serlen << 24) | (prdlen << 16) | (mfrlen << 8) | st0len;
+    sda[1] = sda[0] + 6;
+    sda[2] = sda[0] + 6 + 8;
+    sda[3] = sda[0] + 6 + 8 + 32;
+    info[8] = (4 << 24) | (32 << 16) | (8 << 8) | 6;
 }
 
 static inline void xue_dbc_reset(struct xue *xue)
@@ -1172,6 +1165,8 @@ static inline int64_t xue_putc(struct xue *xue, char c)
 
 static inline void xue_dump(struct xue *xue)
 {
+    (void)xue;
+
 #if defined(__linux__) || defined(__XEN__)
     printk("XUE DUMP:\n");
     printk("    ctrl: 0x%x stat: 0x%x psc: 0x%x\n",
