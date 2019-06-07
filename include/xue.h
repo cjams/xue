@@ -83,7 +83,15 @@ typedef INT_PTR intptr_t;
 //#define PRId64 "lld"
 //#endif
 
-#define XUE_PAGE_SIZE 4096
+#define XUE_PAGE_SIZE 0x1000U
+
+/* MMIO offsets */
+#define XUE_CAP_OFFSET 0x8000U
+#define XUE_DBC_OFFSET 0x700U
+
+/* Extended capability constants of the DbC */
+#define XUE_DBC_CAP_ID 0x0AU
+#define XUE_DBC_CAP_NEXT 0x10U
 
 /* Supported xHC PCI configurations */
 #define XUE_XHC_CLASSC 0xC0330
@@ -94,7 +102,7 @@ typedef INT_PTR intptr_t;
 #define XUE_XHC_DEV_Z370 0xA2AF
 #define XUE_XHC_DEV_Z390 0xA36D
 
-/* DBC idVendor and idProduct */
+/* DbC idVendor and idProduct */
 #define XUE_DBC_VENDOR 0x1D6B
 #define XUE_DBC_PRODUCT 0x0010
 #define XUE_DBC_PROTOCOL 0x0000
@@ -424,10 +432,12 @@ static inline void xue_xhc_write(struct xue *xue, uint32_t cf8, uint32_t reg,
 //    );
 //}
 
-static inline int xue_xhc_init(struct xue *xue)
+static inline struct xue_dbc_reg *xue_xhc_init(struct xue *xue)
 {
     uint32_t bar0;
-    uint64_t bar1, devfn;
+    uint64_t bar1, devfn, cap_phys;
+    uintptr_t cap_list;
+    struct xue_dbc_reg *dbc;
 
     xue->xhc_cf8 = 0;
 
@@ -472,12 +482,28 @@ static inline int xue_xhc_init(struct xue *xue)
     xue_xhc_write(xue, xue->xhc_cf8, 4, 0xFFFFFFFF);
     xue->xhc_mmio_size = ~(xue_xhc_read(xue, xue->xhc_cf8, 4) & 0xFFFFFFF0) + 1;
     xue_xhc_write(xue, xue->xhc_cf8, 4, bar0);
-
     xue->xhc_mmio_phys = (bar0 & 0xFFFFFFF0) | (bar1 << 32);
-    xue->xhc_mmio =
-        (uint8_t *)xue->ops->map_xhc(xue->xhc_mmio_phys, xue->xhc_mmio_size);
 
-    return 1;
+    BFDEBUG("xHC MMIO phys: 0x%llx", xue->xhc_mmio_phys);
+    BFDEBUG("xHC MMIO size: 0x%llx", xue->xhc_mmio_size);
+
+    cap_phys = xue->xhc_mmio_phys + XUE_CAP_OFFSET;
+    cap_list = (uintptr_t)xue->ops->map_xhc(cap_phys, XUE_PAGE_SIZE);
+    xue->xhc_mmio = (uint8_t *)cap_list;
+
+    BFDEBUG("xHC capability base: 0x%llx", cap_list);
+
+    if (!cap_list) {
+        return NULL;
+    }
+
+    dbc = (struct xue_dbc_reg *)(cap_list + XUE_DBC_OFFSET);
+    if ((dbc->id & 0xFFFF) != ((XUE_DBC_CAP_NEXT << 8) | XUE_DBC_CAP_ID)) {
+        BFDEBUG("DbC id register invalid: 0x%lx", dbc->id);
+        return NULL;
+    }
+
+    return dbc;
 }
 
 /**
@@ -488,39 +514,57 @@ static inline int xue_xhc_init(struct xue *xue)
  */
 static inline struct xue_dbc_reg *xue_xhc_find_dbc(struct xue *xue)
 {
-    uint32_t *xcap, next, id;
-    uint8_t *mmio = xue->xhc_mmio;
+//    uint32_t *xcap, next, id;
+    uint64_t mmio = (uint64_t)(xue->xhc_mmio);
+
+    uint32_t *caplen = (uint32_t *)mmio;
     uint32_t *hccp1 = (uint32_t *)(mmio + 0x10);
+    uint32_t xcap_off = 0;
 
     /**
      * Paranoid check against a zero value. The spec mandates that
      * at least one "supported protocol" capability must be implemented,
      * so this should always be false.
      */
-    if ((*hccp1 & 0xFFFF0000) == 0) {
+    if ((*hccp1 & 0xFFFF0000UL) == 0) {
         return NULL;
     }
 
-    xcap = (uint32_t *)(mmio + (((*hccp1 & 0xFFFF0000) >> 16) << 2));
-    next = (*xcap & 0xFF00) >> 8;
-    id = *xcap & 0xFF;
+    xcap_off = ((*hccp1 & 0xFFFF0000UL) >> 16) << 2;
+
+    BFDEBUG("xHC DWORD[1]: 0x%lx", caplen[1]);
+    BFDEBUG("xHC DWORD[2]: 0x%lx", caplen[2]);
+    BFDEBUG("xHC HCCPARAMS1: 0x%lx", *hccp1);
+    BFDEBUG("xHC xcap_off: 0x%llx", xcap_off);
+    BFDEBUG("xHC xcap: 0x%llx", mmio + xcap_off);
+
+//    xcap = (uint32_t *)(mmio + xcap_off);
+//    next = (*xcap & 0xFF00) >> 8;
+//    id = *xcap & 0xFF;
+//
+//    BFDEBUG("xHC xcap: 0x%llx next: 0x%x id: 0x%x", xcap, next, id);
 
     /**
      * Table 7-1 of the spec states that 'next' is relative
      * to the current value of xcap and is a dword offset.
      */
-    while (id != 0x0A && next) {
-        xcap += next;
-        id = *xcap & 0xFF;
-        next = (*xcap & 0xFF00) >> 8;
-    }
+//    while (id != XUE_DBC_XCAPID && next) {
+//        xcap += next;
+//        id = *xcap & 0xFF;
+//        next = (*xcap & 0xFF00) >> 8;
+////    	BFDEBUG("xHC xcap: 0x%llx next: 0x%x id: 0x%x", xcap, next, id);
+//    }
 
-    if (id != 0x0A) {
-        return NULL;
-    }
-
-    xue->xhc_dbc_offset = (uint64_t)xcap - (uint64_t)mmio;
-    return (struct xue_dbc_reg *)xcap;
+//    if (id != XUE_DBC_XCAPID) {
+//        return NULL;
+//    }
+//
+//    xue->xhc_dbc_offset = (uint64_t)xcap - (uint64_t)mmio;
+//    BFDEBUG("DbC offset: 0x%llx", xue->xhc_dbc_offset);
+//    BFDEBUG("DbC regs: 0x%llx", mmio + xue->xhc_dbc_offset);
+//
+//    return (struct xue_dbc_reg *)xcap;
+return NULL;
 }
 
 /**
@@ -935,24 +979,29 @@ static inline void xue_dbc_reset(struct xue *xue)
     reg->ctrl &= ~(1UL << XUE_CTRL_DCE);
     xue->ops->sfence();
     reg->ctrl |= (1UL << XUE_CTRL_DRC);
+
+    BFDEBUG("DbC reset");
 }
 
 static inline int xue_dbc_init(struct xue *xue)
 {
     uint64_t erdp = 0, out = 0, in = 0, mbs = 0;
     struct xue_ops *op = xue->ops;
-    struct xue_dbc_reg *reg = xue_xhc_find_dbc(xue);
+    struct xue_dbc_reg *reg = xue->dbc_reg;
 
     if (!reg) {
         return 0;
     }
 
-    xue->dbc_reg = reg;
     xue_dbc_reset(xue);
 
     xue_trb_ring_init(xue, &xue->dbc_ering, 0);
     xue_trb_ring_init(xue, &xue->dbc_oring, 1);
     xue_trb_ring_init(xue, &xue->dbc_iring, 1);
+
+    BFDEBUG("TRB ering virt: 0x%llx", xue->dbc_ering.trb);
+    BFDEBUG("TRB oring virt: 0x%llx", xue->dbc_oring.trb);
+    BFDEBUG("TRB iring virt: 0x%llx", xue->dbc_iring.trb);
 
     erdp = op->virt_to_phys(xue->dbc_ering.trb);
     if (!erdp) {
@@ -1067,9 +1116,9 @@ static inline void xue_dbc_free(struct xue *xue)
 static inline int xue_open(struct xue *xue, struct xue_ops *ops)
 {
     xue->ops = ops;
+    xue->dbc_reg = xue_xhc_init(xue);
 
-    /* After xue_xhc_init, the xHC's MMIO is mapped in */
-    if (!xue_xhc_init(xue)) {
+    if (!xue->dbc_reg) {
         return 0;
     }
 
@@ -1078,19 +1127,34 @@ static inline int xue_open(struct xue *xue, struct xue_ops *ops)
         return 0;
     }
 
+//    BFDEBUG("DbC id: %x", reg->id);
+//    BFDEBUG("DbC db: %x", reg->db);
+//    BFDEBUG("DbC erstsz: %x", reg->erstsz);
+//    BFDEBUG("DbC rsvdz: %x", reg->rsvdz);
+//    BFDEBUG("DbC erstba: %x", reg->erstba);
+//    BFDEBUG("DbC erdp: %x", reg->erdp);
+//    BFDEBUG("DbC ctrl: %x", reg->ctrl);
+//    BFDEBUG("DbC st: %x", reg->st);
+//    BFDEBUG("DbC portsc: %x", reg->portsc);
+//    BFDEBUG("DbC cp: %x", reg->cp);
+//    BFDEBUG("DbC ddi1: %x", reg->ddi1);
+//    BFDEBUG("DbC ddi2: %x", reg->ddi2);
+
+//    return reg != NULL;
+
     if (!xue_dbc_init(xue)) {
-        xue_dbc_free(xue);
-        if (ops->unmap_xhc) {
-            ops->unmap_xhc(xue->xhc_mmio);
-        }
+//        xue_dbc_free(xue);
+//        if (ops->unmap_xhc) {
+//            ops->unmap_xhc(xue->xhc_mmio);
+//        }
         return 0;
     }
 
-    xue->dbc_owork.enq = 0;
-    xue->dbc_owork.deq = 0;
-    xue->dbc_owork.phys = ops->virt_to_phys(xue->dbc_owork.buf);
-
-    xue_dbc_enable(xue);
+//    xue->dbc_owork.enq = 0;
+//    xue->dbc_owork.deq = 0;
+//    xue->dbc_owork.phys = ops->virt_to_phys(xue->dbc_owork.buf);
+//
+//    xue_dbc_enable(xue);
     return 1;
 }
 
