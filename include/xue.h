@@ -27,34 +27,17 @@
 extern "C" {
 #endif
 
-// TODO: implement commented environs
+/* Linux */
 
-///* --------------------------------------------------------------------------
-///*/
-///* Userspace */
-///* --------------------------------------------------------------------------
-///*/
-//
-//#if !defined(KERNEL) && !defined(_WIN32)
-//#if defined(__cplusplus) && __has_include("cstdint")
-//#include <cstdint>
-//#else
-//#include <stdint.h>
-//#endif
-//#endif
-
-/* -------------------------------------------------------------------------- */
-/* Linux Types                                                                */
-/* -------------------------------------------------------------------------- */
-
-#if defined(__linux__) && !defined(__XEN__)
+#if defined(KERNEL) && defined(__linux__)
 #include <linux/printk.h>
 #include <linux/types.h>
+#define xue_debug(...) printk(KERN_DEBUG "xue debug: " __VA_ARGS__)
+#define xue_alert(...) printk(KERN_ALERT "xue alert: " __VA_ARGS__)
+#define xue_error(...) printk(KERN_ERR "xue error: " __VA_ARGS__)
 #endif
 
-/* -------------------------------------------------------------------------- */
-/* Windows Types                                                              */
-/* -------------------------------------------------------------------------- */
+/* Windows */
 
 #if defined(_WIN32)
 #include <basetsd.h>
@@ -68,20 +51,32 @@ typedef UINT32 uint32_t;
 typedef UINT64 uint64_t;
 typedef UINT_PTR uintptr_t;
 typedef INT_PTR intptr_t;
-#define PRId64 "lld"
+
+#define xue_debug(...) DbgPrintEx(DPFLTR_IHVDRIVER_ID, \
+                                  DPFLTR_INFO_LEVEL, "xue debug: " __VA_ARGS__)
+#define xue_alert(...) DbgPrintEx(DPFLTR_IHVDRIVER_ID, \
+                                  DPFLTR_INFO_LEVEL, "xue alert: " __VA_ARGS__)
+#define xue_error(...) DbgPrintEx(DPFLTR_IHVDRIVER_ID, \
+                                  DPFLTR_ERROR_LEVEL, "xue error: " __VA_ARGS__)
 #endif
 
-///* --------------------------------------------------------------------------
-///*/
-///* EFI Types */
-///* --------------------------------------------------------------------------
-///*/
-//
-//#if defined(KERNEL) && defined(EFI)
-//#include "efi.h"
-//#include "efilib.h"
-//#define PRId64 "lld"
-//#endif
+/* UEFI */
+
+#if defined(KERNEL) && defined(EFI)
+#include "efilib.h"
+#define xue_debug(...) Print(L"xue debug: " __VA_ARGS__)
+#define xue_alert(...) Print(L"xue alert: " __VA_ARGS__)
+#define xue_error(...) Print(L"xue error: " __VA_ARGS__)
+#endif
+
+/* Bareflank */
+
+#if defined(VMM)
+#include <cstdio>
+#define xue_debug(...) printf("xue debug: " __VA_ARGS__)
+#define xue_alert(...) printf("xue alert: " __VA_ARGS__)
+#define xue_error(...) printf("xue error: " __VA_ARGS__)
+#endif
 
 #define XUE_PAGE_SIZE 4096
 
@@ -99,9 +94,7 @@ typedef INT_PTR intptr_t;
 #define XUE_DBC_PRODUCT 0x0010
 #define XUE_DBC_PROTOCOL 0x0000
 
-#define XUE_CTX_SIZE 16
-#define XUE_CTX_BYTES (XUE_CTX_SIZE * 4)
-
+/* DCCTRL fields */
 #define XUE_CTRL_DCR 0
 #define XUE_CTRL_HOT 2
 #define XUE_CTRL_HIT 3
@@ -257,6 +250,9 @@ struct xue_erst_segment {
     uint8_t rsvdz[6];
 };
 
+#define XUE_CTX_SIZE 16
+#define XUE_CTX_BYTES (XUE_CTX_SIZE * 4)
+
 struct xue_dbc_ctx {
     uint32_t info[XUE_CTX_SIZE];
     uint32_t ep_out[XUE_CTX_SIZE];
@@ -280,31 +276,6 @@ struct xue_dbc_reg {
 };
 
 #pragma pack(pop)
-
-static inline void *xue_mset(void *dest, int c, uint64_t size)
-{
-    uint64_t i;
-    char *d = (char *)dest;
-
-    for (i = 0; i < size; i++) {
-        d[i] = (char)c;
-    }
-
-    return dest;
-}
-
-static inline void *xue_mcpy(void *dest, const void *src, uint64_t size)
-{
-    uint64_t i;
-    char *d = (char *)dest;
-    const char *s = (const char *)src;
-
-    for (i = 0; i < size; i++) {
-        d[i] = s[i];
-    }
-
-    return dest;
-}
 
 struct xue_ops {
     /**
@@ -371,12 +342,11 @@ struct xue_ops {
 
 struct xue {
     struct xue_ops *ops;
+    uint32_t xhc_cf8;
 
-    uint8_t *xhc_mmio;
     uint64_t xhc_mmio_phys;
     uint64_t xhc_mmio_size;
-    uint64_t xhc_dbc_offset;
-    uint32_t xhc_cf8;
+    void *xhc_cap_page;
 
     struct xue_dbc_reg *dbc_reg;
     struct xue_dbc_ctx *dbc_ctx;
@@ -388,16 +358,32 @@ struct xue {
     char *dbc_str;
 };
 
-/******************************************************************************
- * eXtensible Host Controller (xhc)
- *
- * The DbC is an optional xHCI extended capability. Before the DbC can be used,
- * it needs to be found in the host controller's extended capability list. This
- * list resides in the controller's MMIO region, which in turn is referred to
- * by the 64-bit BAR in the controller's PCI config space.
- ******************************************************************************/
+static inline void *xue_mset(void *dest, int c, uint64_t size)
+{
+    uint64_t i;
+    char *d = (char *)dest;
 
-static inline uint32_t xue_xhc_read(struct xue *xue, uint32_t cf8, uint32_t reg)
+    for (i = 0; i < size; i++) {
+        d[i] = (char)c;
+    }
+
+    return dest;
+}
+
+static inline void *xue_mcpy(void *dest, const void *src, uint64_t size)
+{
+    uint64_t i;
+    char *d = (char *)dest;
+    const char *s = (const char *)src;
+
+    for (i = 0; i < size; i++) {
+        d[i] = s[i];
+    }
+
+    return dest;
+}
+
+static inline uint32_t xue_pci_read(struct xue *xue, uint32_t cf8, uint32_t reg)
 {
     uint32_t addr = (cf8 & 0xFFFFFF03UL) | (reg << 2);
     xue->ops->outd(0xCF8, addr);
@@ -411,18 +397,6 @@ static inline void xue_xhc_write(struct xue *xue, uint32_t cf8, uint32_t reg,
     xue->ops->outd(0xCF8, addr);
     xue->ops->outd(0xCFC, val);
 }
-
-//static inline void __xue_uart_putc(char c)
-//{
-//    __asm volatile(
-//        "movq $0x3f8, %%rdx\n\t"
-//        "movq %0, %%rax\n\t"
-//        "outb %%al, %%dx\n\t"
-//        :
-//        : "g"(c)
-//        : "cc"
-//    );
-//}
 
 static inline int xue_xhc_init(struct xue *xue)
 {
@@ -934,8 +908,6 @@ static inline void xue_dbc_reset(struct xue *xue)
     xue->ops->sfence();
     reg->ctrl &= ~(1UL << XUE_CTRL_DCE);
     xue->ops->sfence();
-    reg->ctrl |= (1UL << XUE_CTRL_DRC);
-}
 
 static inline int xue_dbc_init(struct xue *xue)
 {
@@ -1167,21 +1139,19 @@ static inline void xue_dump(struct xue *xue)
 {
     (void)xue;
 
-#if defined(__linux__) || defined(__XEN__)
-    printk("XUE DUMP:\n");
-    printk("    ctrl: 0x%x stat: 0x%x psc: 0x%x\n",
+    xue_debug("XUE DUMP:\n");
+    xue_debug("    ctrl: 0x%x stat: 0x%x psc: 0x%x\n",
            xue->dbc_reg->ctrl,
            xue->dbc_reg->st,
            xue->dbc_reg->portsc);
 
-    printk("    id: 0x%x, db: 0x%x\n", xue->dbc_reg->id, xue->dbc_reg->db);
-    printk("    erstsz: %u, erstba: 0x%llx\n", xue->dbc_reg->erstsz, xue->dbc_reg->erstba);
-    printk("    erdp: 0x%llx, cp: 0x%llx\n", xue->dbc_reg->erdp, xue->dbc_reg->cp);
-    printk("    ddi1: 0x%x, ddi2: 0x%x\n", xue->dbc_reg->ddi1, xue->dbc_reg->ddi2);
-    printk("    erstba == virt_to_phys(erst): %d\n", xue->dbc_reg->erstba == xue->ops->virt_to_phys(xue->dbc_erst));
-    printk("    erdp == virt_to_phys(erst[0].base): %d\n", xue->dbc_reg->erdp == xue->dbc_erst[0].base);
-    printk("    cp == virt_to_phys(ctx): %d\n", xue->dbc_reg->cp == xue->ops->virt_to_phys(xue->dbc_ctx));
-#endif
+    xue_debug("    id: 0x%x, db: 0x%x\n", xue->dbc_reg->id, xue->dbc_reg->db);
+    xue_debug("    erstsz: %u, erstba: 0x%llx\n", xue->dbc_reg->erstsz, xue->dbc_reg->erstba);
+    xue_debug("    erdp: 0x%llx, cp: 0x%llx\n", xue->dbc_reg->erdp, xue->dbc_reg->cp);
+    xue_debug("    ddi1: 0x%x, ddi2: 0x%x\n", xue->dbc_reg->ddi1, xue->dbc_reg->ddi2);
+    xue_debug("    erstba == virt_to_phys(erst): %d\n", xue->dbc_reg->erstba == xue->ops->virt_to_phys(xue->dbc_erst));
+    xue_debug("    erdp == virt_to_phys(erst[0].base): %d\n", xue->dbc_reg->erdp == xue->dbc_erst[0].base);
+    xue_debug("    cp == virt_to_phys(ctx): %d\n", xue->dbc_reg->cp == xue->ops->virt_to_phys(xue->dbc_ctx));
 }
 
 static inline void xue_close(struct xue *xue)
@@ -1190,7 +1160,7 @@ static inline void xue_close(struct xue *xue)
     xue_dbc_free(xue);
 
     if (xue->ops->unmap_xhc) {
-        xue->ops->unmap_xhc(xue->xhc_mmio);
+        xue->ops->unmap_xhc(xue->xhc_cap_page);
     }
 }
 
