@@ -78,16 +78,13 @@ typedef INT_PTR intptr_t;
 #define xue_error(...) printf("xue error: " __VA_ARGS__)
 #endif
 
-#define XUE_PAGE_SIZE 4096
-
 /* Supported xHC PCI configurations */
 #define XUE_XHC_CLASSC 0xC0330
 #define XUE_XHC_VEN_INTEL 0x8086
-
-#define XUE_XHC_DEV_WILDCAT_POINT 0x9CB1
-#define XUE_XHC_DEV_SUNRISE_POINT 0x9D2F
 #define XUE_XHC_DEV_Z370 0xA2AF
 #define XUE_XHC_DEV_Z390 0xA36D
+#define XUE_XHC_DEV_WILDCAT_POINT 0x9CB1
+#define XUE_XHC_DEV_SUNRISE_POINT 0x9D2F
 
 /* DBC idVendor and idProduct */
 #define XUE_DBC_VENDOR 0x1D6B
@@ -101,6 +98,7 @@ typedef INT_PTR intptr_t;
 #define XUE_CTRL_DRC 4
 #define XUE_CTRL_DCE 31
 
+/* DCPORTSC fields */
 #define XUE_PSC_PED 1
 #define XUE_PSC_CSC 17
 #define XUE_PSC_PRC 21
@@ -111,99 +109,36 @@ typedef INT_PTR intptr_t;
     ((1UL << XUE_PSC_CSC) | (1UL << XUE_PSC_PRC) | \
      (1UL << XUE_PSC_PLC) | (1UL << XUE_PSC_CEC))
 
-enum {
-    /**
-     * State after a hardware reset or assertion of HCRST. This state
-     * transitions to "disconnected" after setting CTRL.DCE. Clearing CTRL.DCE
-     * or setting USBCMD.HCRST takes the DbC from any state to this state.
-     */
-    xue_dbc_off,
-
-    /**
-     * Transitions to "enabled" once the port is successfully enumerated
-     * by the host. When a disconnect is detected in any state other than
-     * off, the DbC transitions to this state. Any time "disconnected" is
-     * a source or destination state, the PORTSC.CSC bit is set to one.
-     */
-    xue_dbc_disconnected,
-
-    /**
-     * Host enumeration takes place while in this state. The DbC moves
-     * to "configured" provided the host configuration is successful.
-     *
-     * If configuration fails due to an internal error, then this
-     * transitions to "error"
-     * If a LTSSM timeout occurs, then PORTSC.PLC is set and this
-     * transitions to "disabled"
-     * A tPortConfigurationTimeout sets PORTSC.CEC and transitions this
-     * to "disabled"
-     * If a hot or warm reset is detected, then this moves to "resetting"
-     */
-    xue_dbc_enabled,
-
-    /**
-     * Once in this state, the DbC is ready to send/recv data from its
-     * two endpoints.
-     *
-     * If the host deconfigures the device, this moves to "enabled".
-     * If the LTSSM timesout, this moves to "error" and set PORTSC.PLC
-     * If a hot or warm reset is detected, this moves to "resetting"
-     */
-    xue_dbc_configured,
-
-    /**
-     * In this state while hot or warm reset is being signaled and
-     * PORTSC.PED = 0, PORTSC.PR = 1.
-     * Once reset is done, this moves to "enabled" with PORTSC.PED = 1
-     * and PORTSC.PRC = 1
-     */
-    xue_dbc_resetting,
-
-    /**
-     * Writing 0 to PORTSC.PED will move to this state. This allows
-     * the driver to disconnect from the host while maintaining ownership
-     * of the root hub port we are using.
-     *
-     * Writing 1 to PORTSC.PED will move this state to "enabled"
-     */
-    xue_dbc_disabled,
-
-    /**
-     * Come here from "configured" or "enabled", and move to "resetting"
-     * if a warm or hot reset is detected
-     */
-    xue_dbc_error
-};
-
-enum { xue_trb_norm = 1, xue_trb_tfre = 32, xue_trb_psce = 34 };
-enum { xue_trb_cc_success = 1, xue_trb_cc_trb_err = 5 };
-enum { xue_ep_bulk_out = 2, xue_ep_bulk_in = 6 };
-
 /******************************************************************************
  * TRB ring
  *
  * TRB rings are circular queues of TRBs shared between the xHC and the driver.
  * Each ring has one producer and one consumer. The DbC has one event
- * ring and two transfer rings, one for each direction of transfer.
+ * ring and two transfer rings; one IN and one OUT.
  *
  * The xHC hardware is the producer on the event ring, and the
- * driver is the consumer. This means that the event TRBs are read-only from
+ * driver is the consumer. This means that event TRBs are read-only from
  * the driver.
  *
- * OTOH, the driver is the producer of all transfer TRBs on the two transfer
+ * OTOH, the driver is the producer of transfer TRBs on the two transfer
  * rings, so the driver enqueues transfers, and the hardware dequeues
- * transfers. The dequeue pointer of a transfer ring can be discovered in the
- * driver by examining the latest transfer event on the _event_ring_. The
+ * them. The dequeue pointer of a transfer ring is read by the
+ * driver by examining the latest transfer event TRB on the event ring. The
  * transfer event TRB contains the address of the transfer TRB that generated
  * the event.
  *
- * To make each queue circular, the last TRB must be a link TRB, which points
- * to the beginning of the next queue. This implementation does not support
- * multiple segments, so each link TRB points back to the beginning of its
- * own segment.
+ * To make each transfer ring circular, the last TRB must be a link TRB, which
+ * points to the beginning of the next queue. This implementation does not
+ * support multiple segments, so each link TRB points back to the beginning of
+ * its own segment.
  ******************************************************************************/
 
-#define XUE_TRB_MAX_TFR (4096 << 4)
+enum { xue_trb_norm = 1, xue_trb_tfre = 32, xue_trb_psce = 34 };
+enum { xue_trb_cc_success = 1, xue_trb_cc_trb_err = 5 };
+enum { xue_ep_bulk_out = 2, xue_ep_bulk_in = 6 };
+
+#define XUE_PAGE_SIZE 4096
+#define XUE_TRB_MAX_TFR (XUE_PAGE_SIZE << 4)
 #define XUE_TRB_PER_PAGE (XUE_PAGE_SIZE / sizeof(struct xue_trb))
 
 /* Defines the size in bytes of TRB rings as 2^XUE_TRB_RING_ORDER * 4096 */
@@ -279,7 +214,23 @@ struct xue_dbc_reg {
 
 struct xue_ops {
     /**
-     * alloc_pages (optional)
+     * alloc_dma
+     *
+     * @param order - allocate 2^order pages suitable for read/write DMA
+     * @return the allocated pages
+     */
+    void *(*alloc_dma)(uint64_t order);
+
+    /**
+     * free_dma (must be != NULL if alloc_dma != NULL)
+     *
+     * @param addr the base address of the pages to free
+     * @param order the order of the set of pages to free
+     */
+    void (*free_dma)(void *addr, uint64_t order);
+
+    /**
+     * alloc_pages
      *
      * @param order - allocate 2^order pages
      * @return the allocated pages
@@ -287,7 +238,7 @@ struct xue_ops {
     void *(*alloc_pages)(uint64_t order);
 
     /**
-     * free_pages (must be != NULL if alloc_pages != NULL)
+     * free_pages (must be != NULL if alloc_page != NULL)
      *
      * @param addr the base address of the pages to free
      * @param order the order of the set of pages to free
@@ -297,14 +248,14 @@ struct xue_ops {
     /**
      * map_xhc - map in the xHC MMIO region as UC memory
      *
-     * @param phys the physical base address of the xHC
+     * @param phys the value from the xHC's BAR
      * @param size the number of bytes to map in
      * @return the mapped virtual address
      */
     void *(*map_xhc)(uint64_t phys, uint64_t size);
 
     /**
-     * unmap_xhc (optional)
+     * unmap_xhc
      *
      * @param virt the address to unmap
      */
@@ -346,7 +297,8 @@ struct xue {
 
     uint64_t xhc_mmio_phys;
     uint64_t xhc_mmio_size;
-    void *xhc_cap_page;
+    uint64_t xhc_dbc_offset;
+    void *xhc_mmio;
 
     struct xue_dbc_reg *dbc_reg;
     struct xue_dbc_ctx *dbc_ctx;
@@ -390,7 +342,7 @@ static inline uint32_t xue_pci_read(struct xue *xue, uint32_t cf8, uint32_t reg)
     return xue->ops->ind(0xCFC);
 }
 
-static inline void xue_xhc_write(struct xue *xue, uint32_t cf8, uint32_t reg,
+static inline void xue_pci_write(struct xue *xue, uint32_t cf8, uint32_t reg,
                                  uint32_t val)
 {
     uint32_t addr = (cf8 & 0xFFFFFF03UL) | (reg << 2);
@@ -398,21 +350,24 @@ static inline void xue_xhc_write(struct xue *xue, uint32_t cf8, uint32_t reg,
     xue->ops->outd(0xCFC, val);
 }
 
-static inline int xue_xhc_init(struct xue *xue)
+static inline int xue_init_xhc(struct xue *xue)
 {
     uint32_t bar0;
     uint64_t bar1, devfn;
 
     xue->xhc_cf8 = 0;
 
-    /* Search PCI bus 0 for the xHC... TODO: search on buses > 0 */
+    /*
+     * Search PCI bus 0 for the xHC. All the host controllers supported so far
+     * are part of the chipset and are on bus 0.
+     */
     for (devfn = 0; devfn < 256; devfn++) {
         uint32_t dev = (devfn & 0xF8) >> 3;
         uint32_t fun = devfn & 0x07;
         uint32_t cf8 = (1UL << 31) | (dev << 11) | (fun << 8);
-        uint32_t hdr = (xue_xhc_read(xue, cf8, 3) & 0xFF0000U) >> 16;
+        uint32_t hdr = (xue_pci_read(xue, cf8, 3) & 0xFF0000U) >> 16;
 
-        switch (xue_xhc_read(xue, cf8, 0)) {
+        switch (xue_pci_read(xue, cf8, 0)) {
         case (XUE_XHC_DEV_Z370 << 16) | XUE_XHC_VEN_INTEL:
         case (XUE_XHC_DEV_Z390 << 16) | XUE_XHC_VEN_INTEL:
         case (XUE_XHC_DEV_WILDCAT_POINT << 16) | XUE_XHC_VEN_INTEL:
@@ -423,7 +378,7 @@ static inline int xue_xhc_init(struct xue *xue)
         }
 
         if (hdr == 0 || hdr == 0x80) {
-            if ((xue_xhc_read(xue, cf8, 2) >> 8) == XUE_XHC_CLASSC) {
+            if ((xue_pci_read(xue, cf8, 2) >> 8) == XUE_XHC_CLASSC) {
                 xue->xhc_cf8 = cf8;
                 break;
             }
@@ -431,25 +386,25 @@ static inline int xue_xhc_init(struct xue *xue)
     }
 
     if (!xue->xhc_cf8) {
+        xue_error("Compatible xHC not found on bus 0");
         return 0;
     }
 
     /* ...we found it, so parse the BAR and map the registers */
-    bar0 = xue_xhc_read(xue, xue->xhc_cf8, 4);
-    bar1 = xue_xhc_read(xue, xue->xhc_cf8, 5);
+    bar0 = xue_pci_read(xue, xue->xhc_cf8, 4);
+    bar1 = xue_pci_read(xue, xue->xhc_cf8, 5);
 
     /* IO BARs not allowed; BAR must be 64-bit */
     if ((bar0 & 0x1) != 0 || ((bar0 & 0x6) >> 1) != 2) {
         return 0;
     }
 
-    xue_xhc_write(xue, xue->xhc_cf8, 4, 0xFFFFFFFF);
-    xue->xhc_mmio_size = ~(xue_xhc_read(xue, xue->xhc_cf8, 4) & 0xFFFFFFF0) + 1;
-    xue_xhc_write(xue, xue->xhc_cf8, 4, bar0);
+    xue_pci_write(xue, xue->xhc_cf8, 4, 0xFFFFFFFF);
+    xue->xhc_mmio_size = ~(xue_pci_read(xue, xue->xhc_cf8, 4) & 0xFFFFFFF0) + 1;
+    xue_pci_write(xue, xue->xhc_cf8, 4, bar0);
 
     xue->xhc_mmio_phys = (bar0 & 0xFFFFFFF0) | (bar1 << 32);
-    xue->xhc_mmio =
-        (uint8_t *)xue->ops->map_xhc(xue->xhc_mmio_phys, xue->xhc_mmio_size);
+    xue->xhc_mmio = xue->ops->map_xhc(xue->xhc_mmio_phys, xue->xhc_mmio_size);
 
     return 1;
 }
@@ -463,8 +418,9 @@ static inline int xue_xhc_init(struct xue *xue)
 static inline struct xue_dbc_reg *xue_xhc_find_dbc(struct xue *xue)
 {
     uint32_t *xcap, next, id;
-    uint8_t *mmio = xue->xhc_mmio;
+    uint8_t *mmio = (uint8_t *)xue->xhc_mmio;
     uint32_t *hccp1 = (uint32_t *)(mmio + 0x10);
+    const uint32_t DBC_ID = 0xA;
 
     /**
      * Paranoid check against a zero value. The spec mandates that
@@ -483,13 +439,13 @@ static inline struct xue_dbc_reg *xue_xhc_find_dbc(struct xue *xue)
      * Table 7-1 of the spec states that 'next' is relative
      * to the current value of xcap and is a dword offset.
      */
-    while (id != 0x0A && next) {
+    while (id != DBC_ID && next) {
         xcap += next;
         id = *xcap & 0xFF;
         next = (*xcap & 0xFF00) >> 8;
     }
 
-    if (id != 0x0A) {
+    if (id != DBC_ID) {
         return NULL;
     }
 
@@ -503,12 +459,12 @@ static inline struct xue_dbc_reg *xue_xhc_find_dbc(struct xue *xue)
  * bit is the toggle cycle bit in link TRBs, so it shouldn't be in the
  * template.
  */
-static inline uint32_t xue_trb_cyc(struct xue_trb *trb)
+static inline uint32_t xue_trb_cyc(const struct xue_trb *trb)
 {
     return trb->ctrl & 0x1;
 }
 
-static inline uint32_t xue_trb_type(struct xue_trb *trb)
+static inline uint32_t xue_trb_type(const struct xue_trb *trb)
 {
     return (trb->ctrl & 0xFC00) >> 10;
 }
@@ -526,61 +482,6 @@ static inline void xue_trb_set_type(struct xue_trb *trb, uint32_t t)
 }
 
 /* Fields for normal TRBs */
-static inline uint64_t xue_trb_norm_buf(struct xue_trb *trb)
-{
-    return trb->params;
-}
-
-static inline uint32_t xue_trb_norm_inttgt(struct xue_trb *trb)
-{
-    return (trb->status & 0xFFC00000) >> 22;
-}
-
-static inline uint32_t xue_trb_norm_tdsz(struct xue_trb *trb)
-{
-    return (trb->status & 0x003E0000) >> 17;
-}
-
-static inline uint32_t xue_trb_norm_len(struct xue_trb *trb)
-{
-    return (trb->status & 0x0001FFFF);
-}
-
-static inline uint32_t xue_trb_norm_bei(struct xue_trb *trb)
-{
-    return (trb->ctrl & 0x200) >> 9;
-}
-
-static inline uint32_t xue_trb_norm_idt(struct xue_trb *trb)
-{
-    return (trb->ctrl & 0x40) >> 6;
-}
-
-static inline uint32_t xue_trb_norm_ioc(struct xue_trb *trb)
-{
-    return (trb->ctrl & 0x20) >> 5;
-}
-
-static inline uint32_t xue_trb_norm_ch(struct xue_trb *trb)
-{
-    return (trb->ctrl & 0x10) >> 4;
-}
-
-static inline uint32_t xue_trb_norm_ns(struct xue_trb *trb)
-{
-    return (trb->ctrl & 0x8) >> 3;
-}
-
-static inline uint32_t xue_trb_norm_isp(struct xue_trb *trb)
-{
-    return (trb->ctrl & 0x4) >> 2;
-}
-
-static inline uint32_t xue_trb_norm_ent(struct xue_trb *trb)
-{
-    return (trb->ctrl & 0x2) >> 1;
-}
-
 static inline void xue_trb_norm_set_buf(struct xue_trb *trb, uint64_t addr)
 {
     trb->params = addr;
@@ -592,95 +493,26 @@ static inline void xue_trb_norm_set_len(struct xue_trb *trb, uint32_t len)
     trb->status |= len;
 }
 
-static inline void xue_trb_norm_set_chain(struct xue_trb *trb, int chain)
-{
-    trb->ctrl &= ~0x10UL;
-    trb->ctrl |= (chain) ? 0x10UL : 0;
-}
-
 static inline void xue_trb_norm_set_ioc(struct xue_trb *trb)
 {
     trb->ctrl |= 0x20;
-}
-
-static inline void xue_trb_norm_clear_ioc(struct xue_trb *trb)
-{
-    trb->ctrl &= ~0x20UL;
 }
 
 /**
  * Fields for Transfer Event TRBs (see section 6.4.2.1). Note that event
  * TRBs are read-only from software
  */
-static inline uint64_t xue_trb_tfre_ptr(struct xue_trb *trb)
+static inline uint64_t xue_trb_tfre_ptr(const struct xue_trb *trb)
 {
     return trb->params;
 }
 
-static inline uint32_t xue_trb_tfre_cc(struct xue_trb *trb)
-{
-    return trb->status >> 24;
-}
-
-static inline uint32_t xue_trb_tfre_tfrlen(struct xue_trb *trb)
-{
-    return trb->status & 0xFFFFFF;
-}
-
-static inline uint32_t xue_trb_tfre_slotid(struct xue_trb *trb)
-{
-    return trb->ctrl >> 24;
-}
-
-/* Endpoint ID */
-static inline uint32_t xue_trb_tfre_epid(struct xue_trb *trb)
-{
-    return (trb->ctrl & 0x1F0000) >> 16;
-}
-
-/* Event data (immediate) */
-static inline uint32_t xue_trb_tfre_ed(struct xue_trb *trb)
-{
-    return (trb->ctrl & 0x4) >> 2;
-}
-
-/* Fields for Port Status Change Event TRBs (see section 6.4.2.3) */
-static inline uint32_t xue_trb_psce_portid(struct xue_trb *trb)
-{
-    return (trb->params & 0xFF000000) >> 24;
-}
-
-static inline uint32_t xue_trb_psce_cc(struct xue_trb *trb)
+static inline uint32_t xue_trb_tfre_cc(const struct xue_trb *trb)
 {
     return trb->status >> 24;
 }
 
 /* Fields for link TRBs (section 6.4.4.1) */
-static inline uint64_t xue_trb_link_rsp(struct xue_trb *trb)
-{
-    return trb->params;
-}
-
-static inline uint32_t xue_trb_link_inttgt(struct xue_trb *trb)
-{
-    return trb->status >> 22;
-}
-
-static inline uint32_t xue_trb_link_tc(struct xue_trb *trb)
-{
-    return (trb->ctrl & 0x2) >> 1;
-}
-
-static inline uint32_t xue_trb_link_ch(struct xue_trb *trb)
-{
-    return (trb->ctrl & 0x10) >> 4;
-}
-
-static inline uint32_t xue_trb_link_ioc(struct xue_trb *trb)
-{
-    return (trb->ctrl & 0x20) >> 5;
-}
-
 static inline void xue_trb_link_set_rsp(struct xue_trb *trb, uint64_t rsp)
 {
     trb->params = rsp;
@@ -691,22 +523,8 @@ static inline void xue_trb_link_set_tc(struct xue_trb *trb)
     trb->ctrl |= 0x2;
 }
 
-static inline void xue_trb_link_clear_tc(struct xue_trb *trb)
-{
-    trb->ctrl &= ~0x2UL;
-}
-
-static inline void xue_trb_link_set_ioc(struct xue_trb *trb)
-{
-    trb->ctrl |= 0x20;
-}
-
-static inline void xue_trb_link_clear_ioc(struct xue_trb *trb)
-{
-    trb->ctrl &= ~0x20UL;
-}
-
-static inline void xue_trb_ring_init(struct xue *xue, struct xue_trb_ring *ring,
+static inline void xue_trb_ring_init(const struct xue *xue,
+                                     struct xue_trb_ring *ring,
                                      int producer)
 {
     xue_mset(ring->trb, 0, XUE_TRB_RING_CAP * sizeof(ring->trb[0]));
@@ -815,32 +633,10 @@ static inline void xue_pop_events(struct xue *xue)
     xue->dbc_reg->erdp = erdp;
 }
 
-
-static inline int xue_dbc_is_enabled(struct xue *xue)
-{
-    return xue->dbc_reg->ctrl & (1UL << XUE_CTRL_DCE);
-}
-
 static inline void xue_dbc_enable(struct xue *xue)
 {
     xue->ops->sfence();
     xue->dbc_reg->ctrl |= (1UL << XUE_CTRL_DCE);
-}
-
-static inline void xue_dbc_disable(struct xue *xue)
-{
-    xue->dbc_reg->ctrl &= ~(1UL << XUE_CTRL_DCE);
-    xue->ops->sfence();
-}
-
-static inline uint32_t xue_ep_state(uint32_t *ep)
-{
-    return ep[0] & 0x7;
-}
-
-static inline uint32_t xue_ep_type(uint32_t *ep)
-{
-    return (ep[1] & 0x38) >> 3;
 }
 
 static inline void xue_set_ep_type(uint32_t *ep, uint32_t type)
@@ -850,7 +646,7 @@ static inline void xue_set_ep_type(uint32_t *ep, uint32_t type)
 }
 
 /**
- * xue_dbc_init_ep
+ * xue_init_dbc_ep
  *
  * Initializes the endpoint as specified in sections 7.6.3.2 and 7.6.9.2.
  * Each endpoint is Bulk, so MaxPStreams, LSA, HID, CErr, FE,
@@ -862,7 +658,7 @@ static inline void xue_set_ep_type(uint32_t *ep, uint32_t type)
  * TR dequeue ptr: physical base address of transfer ring
  * Avg TRB length: software defined (see section 4.14.1.1)
  */
-static inline void xue_dbc_init_ep(uint32_t *ep, uint64_t mbs,
+static inline void xue_init_dbc_ep(uint32_t *ep, uint64_t mbs,
                                    uint32_t type, uint64_t tr_phys)
 {
     xue_mset(ep, 0, XUE_CTX_BYTES);
@@ -875,7 +671,7 @@ static inline void xue_dbc_init_ep(uint32_t *ep, uint64_t mbs,
 }
 
 /* Initialize the DbC info with USB string descriptor addresses */
-static inline void xue_dbc_init_info(struct xue *xue, uint32_t *info)
+static inline void xue_init_dbc_info(struct xue *xue, uint32_t *info)
 {
     uint64_t *sda;
 
@@ -900,7 +696,7 @@ static inline void xue_dbc_init_info(struct xue *xue, uint32_t *info)
     info[8] = (4 << 24) | (32 << 16) | (8 << 8) | 6;
 }
 
-static inline void xue_dbc_reset(struct xue *xue)
+static inline void xue_reset_dbc(struct xue *xue)
 {
     struct xue_dbc_reg *reg = xue->dbc_reg;
 
@@ -908,8 +704,9 @@ static inline void xue_dbc_reset(struct xue *xue)
     xue->ops->sfence();
     reg->ctrl &= ~(1UL << XUE_CTRL_DCE);
     xue->ops->sfence();
+}
 
-static inline int xue_dbc_init(struct xue *xue)
+static inline int xue_init_dbc(struct xue *xue)
 {
     uint64_t erdp = 0, out = 0, in = 0, mbs = 0;
     struct xue_ops *op = xue->ops;
@@ -920,7 +717,7 @@ static inline int xue_dbc_init(struct xue *xue)
     }
 
     xue->dbc_reg = reg;
-    xue_dbc_reset(xue);
+    xue_reset_dbc(xue);
 
     xue_trb_ring_init(xue, &xue->dbc_ering, 0);
     xue_trb_ring_init(xue, &xue->dbc_oring, 1);
@@ -940,9 +737,9 @@ static inline int xue_dbc_init(struct xue *xue)
     in = op->virt_to_phys(xue->dbc_iring.trb);
 
     xue_mset(xue->dbc_ctx, 0, sizeof(*xue->dbc_ctx));
-    xue_dbc_init_info(xue, xue->dbc_ctx->info);
-    xue_dbc_init_ep(xue->dbc_ctx->ep_out, mbs, xue_ep_bulk_out, out);
-    xue_dbc_init_ep(xue->dbc_ctx->ep_in, mbs, xue_ep_bulk_in, in);
+    xue_init_dbc_info(xue, xue->dbc_ctx->info);
+    xue_init_dbc_ep(xue->dbc_ctx->ep_out, mbs, xue_ep_bulk_out, out);
+    xue_init_dbc_ep(xue->dbc_ctx->ep_in, mbs, xue_ep_bulk_in, in);
 
     reg->erstsz = 1;
     reg->erstba = op->virt_to_phys(xue->dbc_erst);
@@ -954,50 +751,58 @@ static inline int xue_dbc_init(struct xue *xue)
     return 1;
 }
 
-static inline int xue_dbc_alloc(struct xue *xue)
+static inline int xue_alloc_dbc(struct xue *xue)
 {
     struct xue_ops *ops = xue->ops;
 
     if (!ops->alloc_pages) {
         ops->free_pages = NULL;
+    } else {
+        if (!ops->free_pages) {
+            return 0;
+        }
+
+        xue->dbc_ctx = (struct xue_dbc_ctx *)ops->alloc_pages(0);
+        if (!xue->dbc_ctx) {
+            return 0;
+        }
+
+        xue->dbc_erst = (struct xue_erst_segment *)ops->alloc_pages(0);
+        if (!xue->dbc_erst) {
+            goto free_ctx;
+        }
+    }
+
+    if (!ops->alloc_dma) {
+        ops->free_dma = NULL;
         return 1;
     }
 
-    if (!ops->free_pages) {
-        return 0;
+    if (!ops->free_dma) {
+        goto free_erst;
     }
 
-    xue->dbc_ctx = (struct xue_dbc_ctx *)ops->alloc_pages(0);
-    if (!xue->dbc_ctx) {
-        return 0;
-    }
-
-    xue->dbc_erst = (struct xue_erst_segment *)ops->alloc_pages(0);
-    if (!xue->dbc_erst) {
-        goto free_ctx;
-    }
-
-    xue->dbc_ering.trb = (struct xue_trb *)ops->alloc_pages(XUE_TRB_RING_ORDER);
+    xue->dbc_ering.trb = (struct xue_trb *)ops->alloc_dma(XUE_TRB_RING_ORDER);
     if (!xue->dbc_ering.trb) {
         goto free_erst;
     }
 
-    xue->dbc_oring.trb = (struct xue_trb *)ops->alloc_pages(XUE_TRB_RING_ORDER);
+    xue->dbc_oring.trb = (struct xue_trb *)ops->alloc_dma(XUE_TRB_RING_ORDER);
     if (!xue->dbc_oring.trb) {
         goto free_etrb;
     }
 
-    xue->dbc_iring.trb = (struct xue_trb *)ops->alloc_pages(XUE_TRB_RING_ORDER);
+    xue->dbc_iring.trb = (struct xue_trb *)ops->alloc_dma(XUE_TRB_RING_ORDER);
     if (!xue->dbc_iring.trb) {
         goto free_otrb;
     }
 
-    xue->dbc_owork.buf = (uint8_t *)ops->alloc_pages(XUE_WORK_RING_ORDER);
+    xue->dbc_owork.buf = (uint8_t *)ops->alloc_dma(XUE_WORK_RING_ORDER);
     if (!xue->dbc_owork.buf) {
         goto free_itrb;
     }
 
-    xue->dbc_str = (char *)ops->alloc_pages(0);
+    xue->dbc_str = (char *)ops->alloc_dma(0);
     if (!xue->dbc_str) {
         goto free_owrk;
     }
@@ -1005,13 +810,13 @@ static inline int xue_dbc_alloc(struct xue *xue)
     return 1;
 
 free_owrk:
-    ops->free_pages(xue->dbc_owork.buf, 0);
+    ops->free_dma(xue->dbc_owork.buf, XUE_WORK_RING_ORDER);
 free_itrb:
-    ops->free_pages(xue->dbc_iring.trb, XUE_TRB_RING_ORDER);
+    ops->free_dma(xue->dbc_iring.trb, XUE_TRB_RING_ORDER);
 free_otrb:
-    ops->free_pages(xue->dbc_oring.trb, XUE_TRB_RING_ORDER);
+    ops->free_dma(xue->dbc_oring.trb, XUE_TRB_RING_ORDER);
 free_etrb:
-    ops->free_pages(xue->dbc_ering.trb, XUE_TRB_RING_ORDER);
+    ops->free_dma(xue->dbc_ering.trb, XUE_TRB_RING_ORDER);
 free_erst:
     ops->free_pages(xue->dbc_erst, 0);
 free_ctx:
@@ -1020,18 +825,22 @@ free_ctx:
     return 0;
 }
 
-static inline void xue_dbc_free(struct xue *xue)
+static inline void xue_free_dbc(struct xue *xue)
 {
     struct xue_ops *ops = xue->ops;
+
+    if (!ops->free_dma) {
+        return;
+    }
+    ops->free_dma(xue->dbc_str, 0);
+    ops->free_dma(xue->dbc_owork.buf, XUE_WORK_RING_ORDER);
+    ops->free_dma(xue->dbc_iring.trb, XUE_TRB_RING_ORDER);
+    ops->free_dma(xue->dbc_oring.trb, XUE_TRB_RING_ORDER);
+    ops->free_dma(xue->dbc_ering.trb, XUE_TRB_RING_ORDER);
+
     if (!ops->free_pages) {
         return;
     }
-
-    ops->free_pages(xue->dbc_str, 0);
-    ops->free_pages(xue->dbc_owork.buf, XUE_WORK_RING_ORDER);
-    ops->free_pages(xue->dbc_iring.trb, XUE_TRB_RING_ORDER);
-    ops->free_pages(xue->dbc_oring.trb, XUE_TRB_RING_ORDER);
-    ops->free_pages(xue->dbc_ering.trb, XUE_TRB_RING_ORDER);
     ops->free_pages(xue->dbc_erst, 0);
     ops->free_pages(xue->dbc_ctx, 0);
 }
@@ -1040,18 +849,16 @@ static inline int xue_open(struct xue *xue, struct xue_ops *ops)
 {
     xue->ops = ops;
 
-    /* After xue_xhc_init, the xHC's MMIO is mapped in */
-    if (!xue_xhc_init(xue)) {
+    if (!xue_init_xhc(xue)) {
         return 0;
     }
 
-    /* After xue_dbc_alloc, every virtual address is valid */
-    if (!xue_dbc_alloc(xue)) {
+    if (!xue_alloc_dbc(xue)) {
         return 0;
     }
 
-    if (!xue_dbc_init(xue)) {
-        xue_dbc_free(xue);
+    if (!xue_init_dbc(xue)) {
+        xue_free_dbc(xue);
         if (ops->unmap_xhc) {
             ops->unmap_xhc(xue->xhc_mmio);
         }
@@ -1156,11 +963,11 @@ static inline void xue_dump(struct xue *xue)
 
 static inline void xue_close(struct xue *xue)
 {
-    xue_dbc_reset(xue);
-    xue_dbc_free(xue);
+    xue_reset_dbc(xue);
+    xue_free_dbc(xue);
 
     if (xue->ops->unmap_xhc) {
-        xue->ops->unmap_xhc(xue->xhc_cap_page);
+        xue->ops->unmap_xhc(xue->xhc_mmio);
     }
 }
 
