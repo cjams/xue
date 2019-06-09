@@ -23,60 +23,7 @@
 #ifndef XUE_H
 #define XUE_H
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-/* Linux */
-
-#if defined(KERNEL) && defined(__linux__)
-#include <linux/printk.h>
-#include <linux/types.h>
-#define xue_debug(...) printk(KERN_DEBUG "xue debug: " __VA_ARGS__)
-#define xue_alert(...) printk(KERN_ALERT "xue alert: " __VA_ARGS__)
-#define xue_error(...) printk(KERN_ERR "xue error: " __VA_ARGS__)
-#endif
-
-/* Windows */
-
-#if defined(_WIN32)
-#include <basetsd.h>
-typedef INT8 int8_t;
-typedef INT16 int16_t;
-typedef INT32 int32_t;
-typedef INT64 int64_t;
-typedef UINT8 uint8_t;
-typedef UINT16 uint16_t;
-typedef UINT32 uint32_t;
-typedef UINT64 uint64_t;
-typedef UINT_PTR uintptr_t;
-typedef INT_PTR intptr_t;
-
-#define xue_debug(...) DbgPrintEx(DPFLTR_IHVDRIVER_ID, \
-                                  DPFLTR_INFO_LEVEL, "xue debug: " __VA_ARGS__)
-#define xue_alert(...) DbgPrintEx(DPFLTR_IHVDRIVER_ID, \
-                                  DPFLTR_INFO_LEVEL, "xue alert: " __VA_ARGS__)
-#define xue_error(...) DbgPrintEx(DPFLTR_IHVDRIVER_ID, \
-                                  DPFLTR_ERROR_LEVEL, "xue error: " __VA_ARGS__)
-#endif
-
-/* UEFI */
-
-#if defined(KERNEL) && defined(EFI)
-#include "efilib.h"
-#define xue_debug(...) Print(L"xue debug: " __VA_ARGS__)
-#define xue_alert(...) Print(L"xue alert: " __VA_ARGS__)
-#define xue_error(...) Print(L"xue error: " __VA_ARGS__)
-#endif
-
-/* Bareflank */
-
-#if defined(VMM)
-#include <cstdio>
-#define xue_debug(...) printf("xue debug: " __VA_ARGS__)
-#define xue_alert(...) printf("xue alert: " __VA_ARGS__)
-#define xue_error(...) printf("xue error: " __VA_ARGS__)
-#endif
+#define XUE_PAGE_SIZE 4096
 
 /* Supported xHC PCI configurations */
 #define XUE_XHC_CLASSC 0xC0330
@@ -86,7 +33,7 @@ typedef INT_PTR intptr_t;
 #define XUE_XHC_DEV_WILDCAT_POINT 0x9CB1
 #define XUE_XHC_DEV_SUNRISE_POINT 0x9D2F
 
-/* DBC idVendor and idProduct */
+/* DbC idVendor and idProduct */
 #define XUE_DBC_VENDOR 0x1D6B
 #define XUE_DBC_PRODUCT 0x0010
 #define XUE_DBC_PROTOCOL 0x0000
@@ -105,39 +52,289 @@ typedef INT_PTR intptr_t;
 #define XUE_PSC_PLC 22
 #define XUE_PSC_CEC 23
 
-#define XUE_PSC_ACK_MASK \
-    ((1UL << XUE_PSC_CSC) | (1UL << XUE_PSC_PRC) | \
-     (1UL << XUE_PSC_PLC) | (1UL << XUE_PSC_CEC))
+#define XUE_PSC_ACK_MASK                                                       \
+    ((1UL << XUE_PSC_CSC) | (1UL << XUE_PSC_PRC) | (1UL << XUE_PSC_PLC) |      \
+     (1UL << XUE_PSC_CEC))
+
+/* Bareflank VMM */
+#if defined(VMM)
+#include <arch/intel_x64/barrier.h>
+#include <cstdio>
+#include <debug/serial/serial_ns16550a.h>
+#include <debug/serial/serial_pl011.h>
+#include <memory_manager/memory_manager.h>
+
+#define __xue_printf(...)                                                      \
+    do {                                                                       \
+        char buf[256];                                                         \
+        snprintf(buf, 256, __VA_ARGS__);                                       \
+        for (int i = 0; i < 256; i++) {                                        \
+            if (buf[i]) {                                                      \
+                bfvmm::DEFAULT_COM_DRIVER::instance()->write(buf[i]);          \
+            } else {                                                           \
+                break;                                                         \
+            }                                                                  \
+        }                                                                      \
+    } while (0)
+
+#define xue_debug(...) __xue_printf("xue debug: " __VA_ARGS__)
+#define xue_alert(...) __xue_printf("xue alert: " __VA_ARGS__)
+#define xue_error(...) __xue_printf("xue error: " __VA_ARGS__)
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+static inline void xue_sys_sfence(void)
+{
+    _wmb();
+}
+
+static inline uint64_t xue_sys_virt_to_phys(const void *virt)
+{
+    return g_mm->virtptr_to_physint((void *)virt);
+}
+
+static inline void *xue_sys_alloc_pages(uint64_t order)
+{
+    xue_error("%s should not be called from the VMM\n", __func__);
+    return NULL;
+}
+
+static inline void *xue_sys_alloc_dma(uint64_t order)
+{
+    xue_error("%s should not be called from the VMM\n", __func__);
+    return NULL;
+}
+
+static inline void xue_sys_free_pages(void *addr, uint64_t order)
+{
+    xue_error("%s should not be called from the VMM\n", __func__);
+}
+
+static inline void xue_sys_free_dma(void *addr, uint64_t order)
+{
+    xue_error("%s should not be called from the VMM\n", __func__);
+}
+
+static inline void *xue_sys_map_xhc(uint64_t phys, uint64_t count)
+{
+    xue_error("%s should not be called from the VMM\n", __func__);
+    return NULL;
+}
+
+static inline void xue_sys_unmap_xhc(void *virt)
+{
+    xue_error("%s should not be called from the VMM\n", __func__);
+}
+
+static inline void xue_sys_outd(uint32_t port, uint32_t data)
+{
+    xue_error("%s should not be called from the VMM\n", __func__);
+}
+
+static inline uint32_t xue_sys_ind(uint32_t port)
+{
+    xue_error("%s should not be called from the VMM\n", __func__);
+    return 0;
+}
+
+#ifdef __cplusplus
+}
+#endif
+#endif
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* Linux driver */
+#if defined(MODULE) && defined(__linux__)
+#include <asm/io.h>
+#include <linux/printk.h>
+#include <linux/slab.h>
+#include <linux/types.h>
+
+#define xue_debug(...) printk(KERN_DEBUG "xue debug: " __VA_ARGS__)
+#define xue_alert(...) printk(KERN_ALERT "xue alert: " __VA_ARGS__)
+#define xue_error(...) printk(KERN_ERR "xue error: " __VA_ARGS__)
+
+static inline void *xue_sys_alloc_dma(uint64_t order)
+{
+    return (void *)__get_free_pages(GFP_KERNEL | GFP_DMA, order);
+}
+
+static inline void xue_sys_free_dma(void *addr, uint64_t order)
+{
+    free_pages((unsigned long)addr, order);
+}
+
+static inline void *xue_sys_alloc_pages(uint64_t order)
+{
+    return (void *)__get_free_pages(GFP_KERNEL, order);
+}
+
+static inline void xue_sys_free_pages(void *addr, uint64_t order)
+{
+    free_pages((unsigned long)addr, order);
+}
+
+static inline void *xue_sys_map_xhc(uint64_t phys, uint64_t count)
+{
+    return ioremap(phys, (long unsigned int)count);
+}
+
+static inline void xue_sys_unmap_xhc(void *virt)
+{
+    iounmap((volatile void *)virt);
+}
+
+static inline void xue_sys_outd(uint32_t port, uint32_t data)
+{
+    outl(data, port);
+}
+
+static inline uint32_t xue_sys_ind(uint32_t port)
+{
+    return inl((int32_t)port);
+}
+
+static inline uint64_t xue_sys_virt_to_phys(const void *virt)
+{
+    return virt_to_phys((volatile void *)virt);
+}
+
+static inline void xue_sys_sfence(void)
+{
+    wmb();
+}
+
+#endif
+
+/* Windows driver */
+#if defined(_WIN32)
+#include <basetsd.h>
+typedef INT8 int8_t;
+typedef INT16 int16_t;
+typedef INT32 int32_t;
+typedef INT64 int64_t;
+typedef UINT8 uint8_t;
+typedef UINT16 uint16_t;
+typedef UINT32 uint32_t;
+typedef UINT64 uint64_t;
+typedef UINT_PTR uintptr_t;
+typedef INT_PTR intptr_t;
+
+#define xue_debug(...)                                                         \
+    DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,                         \
+               "xue debug: " __VA_ARGS__)
+#define xue_alert(...)                                                         \
+    DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,                         \
+               "xue alert: " __VA_ARGS__)
+#define xue_error(...)                                                         \
+    DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL,                        \
+               "xue error: " __VA_ARGS__)
+#endif
+
+/* Bareflank UEFI driver */
+#if defined(KERNEL) && defined(EFI)
+#include <bfplatform.h>
+#include <efilib.h>
+
+#define xue_debug(...) Print(L"xue debug: " __VA_ARGS__)
+#define xue_alert(...) Print(L"xue alert: " __VA_ARGS__)
+#define xue_error(...) Print(L"xue error: " __VA_ARGS__)
+
+uint32_t _ind(uint16_t);
+void _outd(uint16_t, uint32_t);
+void _sfence(void);
+
+static inline void *xue_sys_alloc_dma(uint64_t order)
+{
+    return platform_alloc_rw(XUE_PAGE_SIZE << order);
+}
+
+static inline void xue_sys_free_dma(void *addr, uint64_t order)
+{
+    platform_free_rw(addr, XUE_PAGE_SIZE << order);
+}
+
+static inline void *xue_sys_alloc_pages(uint64_t order)
+{
+    return platform_alloc_rw(XUE_PAGE_SIZE << order);
+}
+
+static inline void xue_sys_free_pages(void *addr, uint64_t order)
+{
+    platform_free_rw(addr, XUE_PAGE_SIZE << order);
+}
+
+static inline void *xue_sys_map_xhc(uint64_t phys, uint64_t count)
+{
+    (void)count;
+    return (void *)phys;
+}
+
+static inline void xue_sys_unmap_xhc(void *virt)
+{
+    (void)virt;
+}
+
+static inline void xue_sys_outd(uint32_t port, uint32_t val)
+{
+    _outd((uint16_t)port, val);
+}
+
+static inline uint32_t xue_sys_ind(uint32_t port)
+{
+    return _ind((uint16_t)port);
+}
+
+static inline uint64_t xue_sys_virt_to_phys(const void *virt)
+{
+    return (uint64_t)platform_virt_to_phys((void *)virt);
+}
+
+static inline void xue_sys_sfence(void)
+{
+    _sfence();
+}
+
+#endif
 
 /******************************************************************************
- * TRB ring
+ * TRB ring (summarized from the manual):
  *
  * TRB rings are circular queues of TRBs shared between the xHC and the driver.
  * Each ring has one producer and one consumer. The DbC has one event
  * ring and two transfer rings; one IN and one OUT.
  *
- * The xHC hardware is the producer on the event ring, and the
- * driver is the consumer. This means that event TRBs are read-only from
- * the driver.
+ * The DbC hardware is the producer on the event ring, and
+ * xue is the consumer. This means that event TRBs are read-only from
+ * the xue.
  *
- * OTOH, the driver is the producer of transfer TRBs on the two transfer
- * rings, so the driver enqueues transfers, and the hardware dequeues
- * them. The dequeue pointer of a transfer ring is read by the
- * driver by examining the latest transfer event TRB on the event ring. The
+ * OTOH, xue is the producer of transfer TRBs on the two transfer
+ * rings, so xue enqueues transfers, and the hardware dequeues
+ * them. The dequeue pointer of a transfer ring is read by
+ * xue by examining the latest transfer event TRB on the event ring. The
  * transfer event TRB contains the address of the transfer TRB that generated
  * the event.
  *
  * To make each transfer ring circular, the last TRB must be a link TRB, which
- * points to the beginning of the next queue. This implementation does not
- * support multiple segments, so each link TRB points back to the beginning of
- * its own segment.
+ * points to the beginning of the next queue. Note that this implementation
+ * does not support multiple segments, so each link TRB points back to the
+ * beginning of its own segment.
  ******************************************************************************/
 
+/* TRB types */
 enum { xue_trb_norm = 1, xue_trb_tfre = 32, xue_trb_psce = 34 };
+
+/* TRB completion codes */
 enum { xue_trb_cc_success = 1, xue_trb_cc_trb_err = 5 };
+
+/* Endpoint types */
 enum { xue_ep_bulk_out = 2, xue_ep_bulk_in = 6 };
 
-#define XUE_PAGE_SIZE 4096
 #define XUE_TRB_MAX_TFR (XUE_PAGE_SIZE << 4)
 #define XUE_TRB_PER_PAGE (XUE_PAGE_SIZE / sizeof(struct xue_trb))
 
@@ -238,7 +435,7 @@ struct xue_ops {
     void *(*alloc_pages)(uint64_t order);
 
     /**
-     * free_pages (must be != NULL if alloc_page != NULL)
+     * free_pages (must be != NULL if alloc_pages != NULL)
      *
      * @param addr the base address of the pages to free
      * @param order the order of the set of pages to free
@@ -257,7 +454,7 @@ struct xue_ops {
     /**
      * unmap_xhc
      *
-     * @param virt the address to unmap
+     * @param virt the MMIO address to unmap
      */
     void (*unmap_xhc)(void *virt);
 
@@ -410,12 +607,12 @@ static inline int xue_init_xhc(struct xue *xue)
 }
 
 /**
- * The first register of the debug capability (dbc) is found by traversing the
+ * The first register of the debug capability is found by traversing the
  * host controller's capability list (xcap) until a capability
- * with ID = 0xA is found. The xHCI capability list (xcap) begins at address
+ * with ID = 0xA is found. The xHCI capability list begins at address
  * mmio + (HCCPARAMS1[31:16] << 2)
  */
-static inline struct xue_dbc_reg *xue_xhc_find_dbc(struct xue *xue)
+static inline struct xue_dbc_reg *xue_find_dbc(struct xue *xue)
 {
     uint32_t *xcap, next, id;
     uint8_t *mmio = (uint8_t *)xue->xhc_mmio;
@@ -436,8 +633,8 @@ static inline struct xue_dbc_reg *xue_xhc_find_dbc(struct xue *xue)
     id = *xcap & 0xFF;
 
     /**
-     * Table 7-1 of the spec states that 'next' is relative
-     * to the current value of xcap and is a dword offset.
+     * Table 7-1 states that 'next' is relative to
+     * the current value of xcap and is a dword offset.
      */
     while (id != DBC_ID && next) {
         xcap += next;
@@ -524,8 +721,7 @@ static inline void xue_trb_link_set_tc(struct xue_trb *trb)
 }
 
 static inline void xue_trb_ring_init(const struct xue *xue,
-                                     struct xue_trb_ring *ring,
-                                     int producer)
+                                     struct xue_trb_ring *ring, int producer)
 {
     xue_mset(ring->trb, 0, XUE_TRB_RING_CAP * sizeof(ring->trb[0]));
 
@@ -587,8 +783,8 @@ static inline void xue_push_trb(struct xue_trb_ring *ring, uint64_t dma,
     ring->trb[ring->enq++] = trb;
 }
 
-static inline int64_t xue_push_work(struct xue_work_ring *ring,
-                                    const char *buf, int64_t len)
+static inline int64_t xue_push_work(struct xue_work_ring *ring, const char *buf,
+                                    int64_t len)
 {
     int64_t i = 0;
 
@@ -658,8 +854,8 @@ static inline void xue_set_ep_type(uint32_t *ep, uint32_t type)
  * TR dequeue ptr: physical base address of transfer ring
  * Avg TRB length: software defined (see section 4.14.1.1)
  */
-static inline void xue_init_dbc_ep(uint32_t *ep, uint64_t mbs,
-                                   uint32_t type, uint64_t tr_phys)
+static inline void xue_init_dbc_ep(uint32_t *ep, uint64_t mbs, uint32_t type,
+                                   uint64_t tr_phys)
 {
     xue_mset(ep, 0, XUE_CTX_BYTES);
     xue_set_ep_type(ep, type);
@@ -710,7 +906,7 @@ static inline int xue_init_dbc(struct xue *xue)
 {
     uint64_t erdp = 0, out = 0, in = 0, mbs = 0;
     struct xue_ops *op = xue->ops;
-    struct xue_dbc_reg *reg = xue_xhc_find_dbc(xue);
+    struct xue_dbc_reg *reg = xue_find_dbc(xue);
 
     if (!reg) {
         return 0;
@@ -845,9 +1041,36 @@ static inline void xue_free_dbc(struct xue *xue)
     ops->free_pages(xue->dbc_ctx, 0);
 }
 
+#define xue_set_op(ops, op)                                                    \
+    do {                                                                       \
+        if (!ops->op) {                                                        \
+            ops->op = xue_sys_##op;                                            \
+        }                                                                      \
+    } while (0)
+
+static inline void xue_init_ops(struct xue *xue, struct xue_ops *ops)
+{
+    xue_set_op(ops, alloc_dma);
+    xue_set_op(ops, free_dma);
+    xue_set_op(ops, alloc_pages);
+    xue_set_op(ops, free_pages);
+    xue_set_op(ops, map_xhc);
+    xue_set_op(ops, unmap_xhc);
+    xue_set_op(ops, outd);
+    xue_set_op(ops, ind);
+    xue_set_op(ops, virt_to_phys);
+    xue_set_op(ops, sfence);
+
+    xue->ops = ops;
+}
+
 static inline int xue_open(struct xue *xue, struct xue_ops *ops)
 {
-    xue->ops = ops;
+    if (!xue || !ops) {
+        return 0;
+    }
+
+    xue_init_ops(xue, ops);
 
     if (!xue_init_xhc(xue)) {
         return 0;
@@ -911,8 +1134,7 @@ static inline void xue_flush(struct xue *xue)
     xue->dbc_reg->db &= 0xFFFF00FF;
 }
 
-static inline int64_t xue_write(struct xue *xue, const char *buf,
-                                uint64_t size)
+static inline int64_t xue_write(struct xue *xue, const char *buf, uint64_t size)
 {
     int64_t ret;
 
@@ -947,18 +1169,22 @@ static inline void xue_dump(struct xue *xue)
     (void)xue;
 
     xue_debug("XUE DUMP:\n");
-    xue_debug("    ctrl: 0x%x stat: 0x%x psc: 0x%x\n",
-           xue->dbc_reg->ctrl,
-           xue->dbc_reg->st,
-           xue->dbc_reg->portsc);
+    xue_debug("    ctrl: 0x%x stat: 0x%x psc: 0x%x\n", xue->dbc_reg->ctrl,
+              xue->dbc_reg->st, xue->dbc_reg->portsc);
 
     xue_debug("    id: 0x%x, db: 0x%x\n", xue->dbc_reg->id, xue->dbc_reg->db);
-    xue_debug("    erstsz: %u, erstba: 0x%llx\n", xue->dbc_reg->erstsz, xue->dbc_reg->erstba);
-    xue_debug("    erdp: 0x%llx, cp: 0x%llx\n", xue->dbc_reg->erdp, xue->dbc_reg->cp);
-    xue_debug("    ddi1: 0x%x, ddi2: 0x%x\n", xue->dbc_reg->ddi1, xue->dbc_reg->ddi2);
-    xue_debug("    erstba == virt_to_phys(erst): %d\n", xue->dbc_reg->erstba == xue->ops->virt_to_phys(xue->dbc_erst));
-    xue_debug("    erdp == virt_to_phys(erst[0].base): %d\n", xue->dbc_reg->erdp == xue->dbc_erst[0].base);
-    xue_debug("    cp == virt_to_phys(ctx): %d\n", xue->dbc_reg->cp == xue->ops->virt_to_phys(xue->dbc_ctx));
+    xue_debug("    erstsz: %u, erstba: 0x%llx\n", xue->dbc_reg->erstsz,
+              xue->dbc_reg->erstba);
+    xue_debug("    erdp: 0x%llx, cp: 0x%llx\n", xue->dbc_reg->erdp,
+              xue->dbc_reg->cp);
+    xue_debug("    ddi1: 0x%x, ddi2: 0x%x\n", xue->dbc_reg->ddi1,
+              xue->dbc_reg->ddi2);
+    xue_debug("    erstba == virt_to_phys(erst): %d\n",
+              xue->dbc_reg->erstba == xue->ops->virt_to_phys(xue->dbc_erst));
+    xue_debug("    erdp == virt_to_phys(erst[0].base): %d\n",
+              xue->dbc_reg->erdp == xue->dbc_erst[0].base);
+    xue_debug("    cp == virt_to_phys(ctx): %d\n",
+              xue->dbc_reg->cp == xue->ops->virt_to_phys(xue->dbc_ctx));
 }
 
 static inline void xue_close(struct xue *xue)
