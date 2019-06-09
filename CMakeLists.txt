@@ -19,12 +19,20 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.10)
 project(xue)
 
+option(BUILD_TESTS "Build unit tests")
+
+set(XUE_INCLUDE ${PROJECT_SOURCE_DIR}/include)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_CXX_CLANG_TIDY clang-tidy -header-filter=${XUE_INCLUDE}
+    -checks=-*,bugprone-*,cert-*-c,misc-*,perf*
+)
+
 add_library(xue INTERFACE)
-target_include_directories(xue INTERFACE ${PROJECT_SOURCE_DIR}/include)
-install(DIRECTORY ${PROJECT_SOURCE_DIR}/include/ DESTINATION include)
+target_include_directories(xue INTERFACE ${XUE_INCLUDE})
+install(DIRECTORY ${XUE_INCLUDE}/ DESTINATION include)
 
 find_program(FORMAT NAMES clang-format REQUIRED)
 add_custom_target(format COMMAND
@@ -33,16 +41,16 @@ add_custom_target(format COMMAND
     ${FORMAT}
 )
 
-option(BUILD_TESTS "Build unit tests")
-
 if(BUILD_TESTS)
     enable_testing()
     find_package(Catch2 REQUIRED)
-    add_library(catch test/catch.cpp)
 
+    add_library(catch test/catch.cpp)
     add_executable(test_xue test/test_xue.cpp)
+
     target_link_libraries(test_xue catch)
-    target_include_directories(test_xue PRIVATE ${PROJECT_SOURCE_DIR}/include)
+    target_compile_definitions(test_xue PRIVATE XUE_TEST)
+    target_include_directories(test_xue PRIVATE ${XUE_INCLUDE})
 
     add_test(NAME test_xue COMMAND test_xue)
 endif()

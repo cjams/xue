@@ -19,15 +19,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <stdint.h>
-
 #include <catch2/catch.hpp>
 #include <xue.h>
 
 struct xue xue;
-
-struct xue_ops ops = {
-};
+struct xue_ops ops;
 
 TEST_CASE("test")
 {

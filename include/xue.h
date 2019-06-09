@@ -23,15 +23,15 @@
 #ifndef XUE_H
 #define XUE_H
 
-#define XUE_PAGE_SIZE 4096
+#define XUE_PAGE_SIZE 4096ULL
 
 /* Supported xHC PCI configurations */
-#define XUE_XHC_CLASSC 0xC0330
-#define XUE_XHC_VEN_INTEL 0x8086
-#define XUE_XHC_DEV_Z370 0xA2AF
-#define XUE_XHC_DEV_Z390 0xA36D
-#define XUE_XHC_DEV_WILDCAT_POINT 0x9CB1
-#define XUE_XHC_DEV_SUNRISE_POINT 0x9D2F
+#define XUE_XHC_CLASSC 0xC0330ULL
+#define XUE_XHC_VEN_INTEL 0x8086ULL
+#define XUE_XHC_DEV_Z370 0xA2AFULL
+#define XUE_XHC_DEV_Z390 0xA36DULL
+#define XUE_XHC_DEV_WILDCAT_POINT 0x9CB1ULL
+#define XUE_XHC_DEV_SUNRISE_POINT 0x9D2FULL
 
 /* DbC idVendor and idProduct */
 #define XUE_DBC_VENDOR 0x1D6B
@@ -55,6 +55,38 @@
 #define XUE_PSC_ACK_MASK                                                       \
     ((1UL << XUE_PSC_CSC) | (1UL << XUE_PSC_PRC) | (1UL << XUE_PSC_PLC) |      \
      (1UL << XUE_PSC_CEC))
+
+/* Userspace testing */
+#if defined(XUE_TEST)
+#include <cstdint>
+#include <cstdio>
+
+#define xue_debug(...) printf("xue debug: " __VA_ARGS__)
+#define xue_alert(...) printf("xue alert: " __VA_ARGS__)
+#define xue_error(...) printf("xue error: " __VA_ARGS__)
+
+extern "C" {
+static inline uint64_t xue_sys_virt_to_phys(const void *virt)
+{
+    return (uint64_t)virt;
+}
+
+static inline void *xue_sys_map_xhc(uint64_t /*phys*/, uint64_t /*count*/)
+{
+    return NULL;
+}
+
+static inline void xue_sys_sfence(void) { }
+static inline void *xue_sys_alloc_pages(uint64_t /*order*/) { return NULL; }
+static inline void *xue_sys_alloc_dma(uint64_t /*order*/) { return NULL; }
+static inline void xue_sys_free_pages(void * /*addr*/, uint64_t /*order*/) { }
+static inline void xue_sys_free_dma(void * /*addr*/, uint64_t /*order*/) { }
+static inline void xue_sys_unmap_xhc(void * /*virt*/) { }
+static inline void xue_sys_outd(uint32_t /*port*/, uint32_t /*data*/) { }
+static inline uint32_t xue_sys_ind(uint32_t /*port*/) { return 0; }
+}
+
+#endif
 
 /* Bareflank VMM */
 #if defined(VMM)
@@ -551,7 +583,8 @@ static inline void xue_pci_write(struct xue *xue, uint32_t cf8, uint32_t reg,
 static inline int xue_init_xhc(struct xue *xue)
 {
     uint32_t bar0;
-    uint64_t bar1, devfn;
+    uint64_t bar1;
+    uint64_t devfn;
 
     xue->xhc_cf8 = 0;
 
@@ -615,7 +648,9 @@ static inline int xue_init_xhc(struct xue *xue)
  */
 static inline struct xue_dbc_reg *xue_find_dbc(struct xue *xue)
 {
-    uint32_t *xcap, next, id;
+    uint32_t *xcap;
+    uint32_t next;
+    uint32_t id;
     uint8_t *mmio = (uint8_t *)xue->xhc_mmio;
     uint32_t *hccp1 = (uint32_t *)(mmio + 0x10);
     const uint32_t DBC_ID = 0xA;
@@ -905,7 +940,10 @@ static inline void xue_reset_dbc(struct xue *xue)
 
 static inline int xue_init_dbc(struct xue *xue)
 {
-    uint64_t erdp = 0, out = 0, in = 0, mbs = 0;
+    uint64_t erdp = 0;
+    uint64_t out = 0;
+    uint64_t in = 0;
+    uint64_t mbs = 0;
     struct xue_ops *op = xue->ops;
     struct xue_dbc_reg *reg = xue_find_dbc(xue);
 
@@ -1042,7 +1080,7 @@ static inline void xue_free_dbc(struct xue *xue)
     ops->free_pages(xue->dbc_ctx, 0);
 }
 
-#define xue_set_op(ops, op)                                                    \
+#define xue_set_op(op)                                                         \
     do {                                                                       \
         if (!ops->op) {                                                        \
             ops->op = xue_sys_##op;                                            \
@@ -1051,16 +1089,16 @@ static inline void xue_free_dbc(struct xue *xue)
 
 static inline void xue_init_ops(struct xue *xue, struct xue_ops *ops)
 {
-    xue_set_op(ops, alloc_dma);
-    xue_set_op(ops, free_dma);
-    xue_set_op(ops, alloc_pages);
-    xue_set_op(ops, free_pages);
-    xue_set_op(ops, map_xhc);
-    xue_set_op(ops, unmap_xhc);
-    xue_set_op(ops, outd);
-    xue_set_op(ops, ind);
-    xue_set_op(ops, virt_to_phys);
-    xue_set_op(ops, sfence);
+    xue_set_op(alloc_dma);
+    xue_set_op(free_dma);
+    xue_set_op(alloc_pages);
+    xue_set_op(free_pages);
+    xue_set_op(map_xhc);
+    xue_set_op(unmap_xhc);
+    xue_set_op(outd);
+    xue_set_op(ind);
+    xue_set_op(virt_to_phys);
+    xue_set_op(sfence);
 
     xue->ops = ops;
 }
