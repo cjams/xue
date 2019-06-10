@@ -76,14 +76,23 @@ static inline void *xue_sys_map_xhc(uint64_t /*phys*/, uint64_t /*count*/)
     return NULL;
 }
 
-static inline void xue_sys_sfence(void) { }
-static inline void *xue_sys_alloc_pages(uint64_t /*order*/) { return NULL; }
-static inline void *xue_sys_alloc_dma(uint64_t /*order*/) { return NULL; }
-static inline void xue_sys_free_pages(void * /*addr*/, uint64_t /*order*/) { }
-static inline void xue_sys_free_dma(void * /*addr*/, uint64_t /*order*/) { }
-static inline void xue_sys_unmap_xhc(void * /*virt*/) { }
-static inline void xue_sys_outd(uint32_t /*port*/, uint32_t /*data*/) { }
-static inline uint32_t xue_sys_ind(uint32_t /*port*/) { return 0; }
+static inline void xue_sys_sfence(void) {}
+static inline void *xue_sys_alloc_pages(uint64_t /*order*/)
+{
+    return NULL;
+}
+static inline void *xue_sys_alloc_dma(uint64_t /*order*/)
+{
+    return NULL;
+}
+static inline void xue_sys_free_pages(void * /*addr*/, uint64_t /*order*/) {}
+static inline void xue_sys_free_dma(void * /*addr*/, uint64_t /*order*/) {}
+static inline void xue_sys_unmap_xhc(void * /*virt*/) {}
+static inline void xue_sys_outd(uint32_t /*port*/, uint32_t /*data*/) {}
+static inline uint32_t xue_sys_ind(uint32_t /*port*/)
+{
+    return 0;
+}
 }
 
 #endif
@@ -617,7 +626,7 @@ static inline int xue_init_xhc(struct xue *xue)
     }
 
     if (!xue->xhc_cf8) {
-        xue_error("Compatible xHC not found on bus 0");
+        xue_error("Compatible xHC not found on bus 0\n");
         return 0;
     }
 
@@ -637,7 +646,7 @@ static inline int xue_init_xhc(struct xue *xue)
     xue->xhc_mmio_phys = (bar0 & 0xFFFFFFF0) | (bar1 << 32);
     xue->xhc_mmio = xue->ops->map_xhc(xue->xhc_mmio_phys, xue->xhc_mmio_size);
 
-    return 1;
+    return xue->xhc_mmio != NULL;
 }
 
 /**
