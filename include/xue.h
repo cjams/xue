@@ -56,6 +56,19 @@
     ((1UL << XUE_PSC_CSC) | (1UL << XUE_PSC_PRC) | (1UL << XUE_PSC_PLC) |      \
      (1UL << XUE_PSC_CEC))
 
+static inline int known_xhc(uint32_t dev_ven)
+{
+    switch (dev_ven) {
+    case (XUE_XHC_DEV_Z370 << 16) | XUE_XHC_VEN_INTEL:
+    case (XUE_XHC_DEV_Z390 << 16) | XUE_XHC_VEN_INTEL:
+    case (XUE_XHC_DEV_WILDCAT_POINT << 16) | XUE_XHC_VEN_INTEL:
+    case (XUE_XHC_DEV_SUNRISE_POINT << 16) | XUE_XHC_VEN_INTEL:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 /* Userspace testing */
 #if defined(XUE_TEST)
 #include <cstdint>
@@ -66,32 +79,22 @@
 #define xue_error(...) printf("xue error: " __VA_ARGS__)
 
 extern "C" {
-static inline uint64_t xue_sys_virt_to_phys(const void *virt)
+static inline int xue_sys_init(void *) { return 1; }
+static inline void xue_sys_sfence(void *) {}
+static inline void *xue_sys_map_xhc(void *sys, uint64_t, uint64_t)
+{
+    return NULL;
+}
+static inline void xue_sys_unmap_xhc(void *sys, void *) {}
+static inline void *xue_sys_alloc_pages(void *sys, uint64_t) { return NULL; }
+static inline void *xue_sys_alloc_dma(void *sys, uint64_t) { return NULL; }
+static inline void xue_sys_free_pages(void *sys, void *, uint64_t) {}
+static inline void xue_sys_free_dma(void *sys, void *, uint64_t) {}
+static inline void xue_sys_outd(void *sys, uint32_t, uint32_t) {}
+static inline uint32_t xue_sys_ind(void *sys, uint32_t) { return 0; }
+static inline uint64_t xue_sys_virt_to_dma(void *sys, const void *virt)
 {
     return (uint64_t)virt;
-}
-
-static inline void *xue_sys_map_xhc(uint64_t /*phys*/, uint64_t /*count*/)
-{
-    return NULL;
-}
-
-static inline void xue_sys_sfence(void) {}
-static inline void *xue_sys_alloc_pages(uint64_t /*order*/)
-{
-    return NULL;
-}
-static inline void *xue_sys_alloc_dma(uint64_t /*order*/)
-{
-    return NULL;
-}
-static inline void xue_sys_free_pages(void * /*addr*/, uint64_t /*order*/) {}
-static inline void xue_sys_free_dma(void * /*addr*/, uint64_t /*order*/) {}
-static inline void xue_sys_unmap_xhc(void * /*virt*/) {}
-static inline void xue_sys_outd(uint32_t /*port*/, uint32_t /*data*/) {}
-static inline uint32_t xue_sys_ind(uint32_t /*port*/)
-{
-    return 0;
 }
 }
 
@@ -126,56 +129,54 @@ static inline uint32_t xue_sys_ind(uint32_t /*port*/)
 extern "C" {
 #endif
 
-static inline void xue_sys_sfence(void)
-{
-    _wmb();
-}
+static inline int xue_sys_init(void *) { return 1; }
+static inline void xue_sys_sfence(void *) { _wmb(); }
 
-static inline uint64_t xue_sys_virt_to_phys(const void *virt)
+static inline uint64_t xue_sys_virt_to_dma(void *sys, const void *virt)
 {
     xue_error("%s should not be called from the VMM\n", __func__);
     return 0;
 }
 
-static inline void *xue_sys_alloc_pages(uint64_t order)
+static inline void *xue_sys_alloc_pages(void *sys, uint64_t order)
 {
     xue_error("%s should not be called from the VMM\n", __func__);
     return NULL;
 }
 
-static inline void *xue_sys_alloc_dma(uint64_t order)
+static inline void *xue_sys_alloc_dma(void *sys, uint64_t order)
 {
     xue_error("%s should not be called from the VMM\n", __func__);
     return NULL;
 }
 
-static inline void xue_sys_free_pages(void *addr, uint64_t order)
+static inline void xue_sys_free_pages(void *sys, void *addr, uint64_t order)
 {
     xue_error("%s should not be called from the VMM\n", __func__);
 }
 
-static inline void xue_sys_free_dma(void *addr, uint64_t order)
+static inline void xue_sys_free_dma(void *sys, void *addr, uint64_t order)
 {
     xue_error("%s should not be called from the VMM\n", __func__);
 }
 
-static inline void *xue_sys_map_xhc(uint64_t phys, uint64_t count)
+static inline void *xue_sys_map_xhc(void *sys, uint64_t phys, uint64_t count)
 {
     xue_error("%s should not be called from the VMM\n", __func__);
     return NULL;
 }
 
-static inline void xue_sys_unmap_xhc(void *virt)
+static inline void xue_sys_unmap_xhc(void *sys, void *virt)
 {
     xue_error("%s should not be called from the VMM\n", __func__);
 }
 
-static inline void xue_sys_outd(uint32_t port, uint32_t data)
+static inline void xue_sys_outd(void *sys, uint32_t port, uint32_t data)
 {
     xue_error("%s should not be called from the VMM\n", __func__);
 }
 
-static inline uint32_t xue_sys_ind(uint32_t port)
+static inline uint32_t xue_sys_ind(void *sys, uint32_t port)
 {
     xue_error("%s should not be called from the VMM\n", __func__);
     return 0;
@@ -201,54 +202,52 @@ extern "C" {
 #define xue_alert(...) printk(KERN_ALERT "xue alert: " __VA_ARGS__)
 #define xue_error(...) printk(KERN_ERR "xue error: " __VA_ARGS__)
 
-static inline void *xue_sys_alloc_dma(uint64_t order)
+static inline int xue_sys_init(void *sys) { return 1; }
+static inline void xue_sys_sfence(void *sys) { wmb(); }
+
+static inline void *xue_sys_alloc_dma(void *sys, uint64_t order)
 {
     return (void *)__get_free_pages(GFP_KERNEL | GFP_DMA, order);
 }
 
-static inline void xue_sys_free_dma(void *addr, uint64_t order)
+static inline void xue_sys_free_dma(void *sys, void *addr, uint64_t order)
 {
     free_pages((unsigned long)addr, order);
 }
 
-static inline void *xue_sys_alloc_pages(uint64_t order)
+static inline void *xue_sys_alloc_pages(void *sys, uint64_t order)
 {
     return (void *)__get_free_pages(GFP_KERNEL, order);
 }
 
-static inline void xue_sys_free_pages(void *addr, uint64_t order)
+static inline void xue_sys_free_pages(void *sys, void *addr, uint64_t order)
 {
     free_pages((unsigned long)addr, order);
 }
 
-static inline void *xue_sys_map_xhc(uint64_t phys, uint64_t count)
+static inline void *xue_sys_map_xhc(void *sys, uint64_t phys, uint64_t count)
 {
     return ioremap(phys, (long unsigned int)count);
 }
 
-static inline void xue_sys_unmap_xhc(void *virt)
+static inline void xue_sys_unmap_xhc(void *sys, void *virt)
 {
     iounmap((volatile void *)virt);
 }
 
-static inline void xue_sys_outd(uint32_t port, uint32_t data)
+static inline void xue_sys_outd(void *sys, uint32_t port, uint32_t data)
 {
     outl(data, port);
 }
 
-static inline uint32_t xue_sys_ind(uint32_t port)
+static inline uint32_t xue_sys_ind(void *sys, uint32_t port)
 {
     return inl((int32_t)port);
 }
 
-static inline uint64_t xue_sys_virt_to_phys(const void *virt)
+static inline uint64_t xue_sys_virt_to_dma(void *sys, const void *virt)
 {
     return virt_to_phys((volatile void *)virt);
-}
-
-static inline void xue_sys_sfence(void)
-{
-    wmb();
 }
 
 #endif
@@ -278,68 +277,172 @@ typedef INT_PTR intptr_t;
                "xue error: " __VA_ARGS__)
 #endif
 
-/* Bareflank UEFI driver */
+/* UEFI driver (based on gnuefi) */
 #if defined(EFI)
-#include <bfplatform.h>
 #include <efilib.h>
 
 #define xue_debug(...) Print(L"xue debug: " __VA_ARGS__)
 #define xue_alert(...) Print(L"xue alert: " __VA_ARGS__)
 #define xue_error(...) Print(L"xue error: " __VA_ARGS__)
 
-uint32_t _ind(uint16_t);
-void _outd(uint16_t, uint32_t);
-void _sfence(void);
+struct xue_efi {
+    EFI_HANDLE img_hand;
+    EFI_HANDLE pci_hand;
+    EFI_PCI_IO *pci_io;
+};
 
-static inline void *xue_sys_alloc_dma(uint64_t order)
+static inline int xue_sys_init(void *sys)
 {
-    return platform_alloc_rw(XUE_PAGE_SIZE << order);
+    EFI_STATUS rc;
+    EFI_HANDLE *hand;
+    UINTN nr_hand;
+    UINTN i;
+
+    struct xue_efi *efi = (struct xue_efi *)sys;
+
+    rc = LibLocateHandle(ByProtocol, &PciIoProtocol, NULL, &nr_hand, &hand);
+    if (EFI_ERROR(rc)) {
+        xue_error("%s: LocateHandle failed: 0x%llx\n", __func__, rc);
+        return 0;
+    }
+
+    for (i = 0; i < nr_hand; i++) {
+        UINT32 dev_ven;
+        EFI_PCI_IO *pci_io = NULL;
+
+        rc = gBS->OpenProtocol(hand[i], &PciIoProtocol, (VOID **)&pci_io,
+                               efi->img_hand, NULL,
+                               EFI_OPEN_PROTOCOL_GET_PROTOCOL);
+        if (EFI_ERROR(rc)) {
+            continue;
+        }
+
+        rc = pci_io->Pci.Read(pci_io, EfiPciIoWidthUint32, 0, 1, &dev_ven);
+        if (EFI_ERROR(rc)) {
+            gBS->CloseProtocol(hand[i], &PciIoProtocol, efi->img_hand, NULL);
+            continue;
+        }
+
+        if (known_xhc(dev_ven)) {
+            efi->pci_hand = hand[i];
+            efi->pci_io = pci_io;
+            return 1;
+        }
+    }
+
+    xue_error("%s: Failed to open PCI_IO_PROTOCOL on any known xHC\n");
+    return 0;
 }
 
-static inline void xue_sys_free_dma(void *addr, uint64_t order)
+static inline void *xue_sys_alloc_dma(void *sys, uint64_t order)
 {
-    platform_free_rw(addr, XUE_PAGE_SIZE << order);
+    const EFI_ALLOCATE_TYPE atype = AllocateAnyPages;
+    const EFI_MEMORY_TYPE mtype = EfiRuntimeServicesData;
+    const UINTN pages = 1UL << order;
+    const UINTN attrs = EFI_PCI_ATTRIBUTE_MEMORY_CACHED;
+    struct xue_efi *efi = (struct xue_efi *)sys;
+    EFI_PCI_IO *pci = efi->pci_io;
+    VOID *addr = NULL;
+
+    EFI_STATUS rc = pci->AllocateBuffer(pci, atype, mtype, pages, &addr, attrs);
+    if (EFI_ERROR(rc)) {
+        xue_error("%s: AllocateBuffer failed: 0x%llx\n", rc);
+        return NULL;
+    }
+
+    return addr;
 }
 
-static inline void *xue_sys_alloc_pages(uint64_t order)
+static inline void xue_sys_free_dma(void *sys, void *addr, uint64_t order)
 {
-    return platform_alloc_rw(XUE_PAGE_SIZE << order);
+    const UINTN pages = 1UL << order;
+    struct xue_efi *efi = (struct xue_efi *)sys;
+    EFI_PCI_IO *pci = efi->pci_io;
+
+    /* TODO - ensure addr is Unmap()'d prior to freeing */
+    EFI_STATUS rc = pci->FreeBuffer(pci, pages, addr);
+    if (EFI_ERROR(rc)) {
+        xue_error("%s: FreeBuffer failed: 0x%llx\n", rc);
+    }
 }
 
-static inline void xue_sys_free_pages(void *addr, uint64_t order)
+static inline void *xue_sys_alloc_pages(void *sys, uint64_t order)
 {
-    platform_free_rw(addr, XUE_PAGE_SIZE << order);
+    (void)sys;
+
+    const EFI_ALLOCATE_TYPE atype = AllocateAnyPages;
+    const EFI_MEMORY_TYPE mtype = EfiRuntimeServicesData;
+    const UINTN pages = 1UL << order;
+    EFI_PHYSICAL_ADDRESS addr = 0;
+
+    EFI_STATUS rc = gBS->AllocatePages(atype, mtype, pages, &addr);
+    if (EFI_ERROR(rc)) {
+        xue_error("AllocatePages failed: 0x%llx\n", rc);
+        return NULL;
+    }
+
+    return (void *)addr;
 }
 
-static inline void *xue_sys_map_xhc(uint64_t phys, uint64_t count)
+static inline void xue_sys_free_pages(void *sys, void *addr, uint64_t order)
 {
+    (void)sys;
+    const UINTN pages = 1UL << order;
+
+    EFI_STATUS rc = gBS->FreePages((EFI_PHYSICAL_ADDRESS)addr, pages);
+    if (EFI_ERROR(rc)) {
+        xue_error("FreePages failed: 0x%llx\n", rc);
+    }
+}
+
+static inline void *xue_sys_map_xhc(void *sys, uint64_t phys, uint64_t count)
+{
+    (void)sys;
     (void)count;
+
     return (void *)phys;
 }
 
-static inline void xue_sys_unmap_xhc(void *virt)
+static inline void xue_sys_outd(void *sys, uint32_t port, uint32_t val)
 {
+    (void)sys;
+
+    __asm volatile("movq %0, %%rdx\n\t"
+                   "movq %1, %%rax\n\t"
+                   "outl %%eax, %%dx\n\t"
+                   :
+                   : "g"((uint64_t)port), "g"((uint64_t)val));
+}
+
+static inline uint32_t xue_sys_ind(void *sys, uint32_t port)
+{
+    (void)sys;
+    uint32_t ret;
+
+    __asm volatile("xorq %%rax, %%rax\n\t"
+                   "movq %1, %%rdx\n\t"
+                   "inl %%dx, %%eax\n\t"
+                   : "=a"(ret)
+                   : "g"((uint64_t)port));
+    return ret;
+}
+
+static inline uint64_t xue_sys_virt_to_dma(void *sys, const void *virt)
+{
+    (void)sys;
+    return (uint64_t)virt;
+}
+
+static inline void xue_sys_unmap_xhc(void *sys, void *virt)
+{
+    (void)sys;
     (void)virt;
 }
 
-static inline void xue_sys_outd(uint32_t port, uint32_t val)
+static inline void xue_sys_sfence(void *sys)
 {
-    _outd((uint16_t)port, val);
-}
-
-static inline uint32_t xue_sys_ind(uint32_t port)
-{
-    return _ind((uint16_t)port);
-}
-
-static inline uint64_t xue_sys_virt_to_phys(const void *virt)
-{
-    return (uint64_t)platform_virt_to_phys((void *)virt);
-}
-
-static inline void xue_sys_sfence(void)
-{
-    _sfence();
+    (void)sys;
+    __asm volatile("sfence");
 }
 
 #endif
@@ -379,7 +482,7 @@ enum {
 /* TRB completion codes */
 enum { xue_trb_cc_success = 1, xue_trb_cc_trb_err = 5 };
 
-/* Endpoint types */
+/* DbC endpoint types */
 enum { xue_ep_bulk_out = 2, xue_ep_bulk_in = 6 };
 
 /* DMA/MMIO structures */
@@ -425,12 +528,7 @@ struct xue_dbc_reg {
 #define XUE_TRB_MAX_TFR (XUE_PAGE_SIZE << 4)
 #define XUE_TRB_PER_PAGE (XUE_PAGE_SIZE / sizeof(struct xue_trb))
 
-/*
- * Defines the size in bytes of TRB rings as 2^XUE_TRB_RING_ORDER * 4096
- * Note that xue_pop_events below assumes that TRB rings are one page,
- * so TRB ring order is hardcoded to 0. If larger TRB rings are needed,
- * the xue_pop_events code will need to be updated.
- */
+/* Defines the size in bytes of TRB rings as 2^XUE_TRB_RING_ORDER * 4096 */
 #ifndef XUE_TRB_RING_ORDER
 #define XUE_TRB_RING_ORDER 0
 #endif
@@ -464,12 +562,20 @@ struct xue_work_ring {
 
 struct xue_ops {
     /**
+     * init - perform system-specific init operations
+     *
+     * @param sys a pointer to a system-specific data structure
+     * @return != 0 iff successful
+     */
+    int (*init)(void *sys);
+
+    /**
      * alloc_dma
      *
      * @param order - allocate 2^order pages suitable for read/write DMA
      * @return the allocated pages
      */
-    void *(*alloc_dma)(uint64_t order);
+    void *(*alloc_dma)(void *sys, uint64_t order);
 
     /**
      * free_dma (must be != NULL if alloc_dma != NULL)
@@ -477,7 +583,7 @@ struct xue_ops {
      * @param addr the base address of the pages to free
      * @param order the order of the set of pages to free
      */
-    void (*free_dma)(void *addr, uint64_t order);
+    void (*free_dma)(void *sys, void *addr, uint64_t order);
 
     /**
      * alloc_pages
@@ -485,7 +591,7 @@ struct xue_ops {
      * @param order - allocate 2^order pages
      * @return the allocated pages
      */
-    void *(*alloc_pages)(uint64_t order);
+    void *(*alloc_pages)(void *sys, uint64_t order);
 
     /**
      * free_pages (must be != NULL if alloc_pages != NULL)
@@ -493,7 +599,7 @@ struct xue_ops {
      * @param addr the base address of the pages to free
      * @param order the order of the set of pages to free
      */
-    void (*free_pages)(void *addr, uint64_t order);
+    void (*free_pages)(void *sys, void *addr, uint64_t order);
 
     /**
      * map_xhc - map in the xHC MMIO region as UC memory
@@ -502,14 +608,14 @@ struct xue_ops {
      * @param size the number of bytes to map in
      * @return the mapped virtual address
      */
-    void *(*map_xhc)(uint64_t phys, uint64_t size);
+    void *(*map_xhc)(void *sys, uint64_t phys, uint64_t size);
 
     /**
      * unmap_xhc
      *
      * @param virt the MMIO address to unmap
      */
-    void (*unmap_xhc)(void *virt);
+    void (*unmap_xhc)(void *sys, void *virt);
 
     /**
      * outd - write 32 bits to IO port
@@ -517,7 +623,7 @@ struct xue_ops {
      * @param port the port to write to
      * @param data the data to write
      */
-    void (*outd)(uint32_t port, uint32_t data);
+    void (*outd)(void *sys, uint32_t port, uint32_t data);
 
     /**
      * ind - read 32 bits from IO port
@@ -525,26 +631,27 @@ struct xue_ops {
      * @param port the port to read from
      * @return the data read from the port
      */
-    uint32_t (*ind)(uint32_t port);
+    uint32_t (*ind)(void *sys, uint32_t port);
 
     /**
-     * virt_to_phys - translate a virtual address to a physical address
+     * virt_to_dma - translate a virtual address to a physical address
      *
      * @param virt the virtual address to translate
      * @return the resulting physical address
      */
-    uint64_t (*virt_to_phys)(const void *virt);
+    uint64_t (*virt_to_dma)(void *sys, const void *virt);
 
     /**
      * sfence - write memory barrier
      */
-    void (*sfence)(void);
+    void (*sfence)(void *sys);
 };
 
 struct xue {
+    void *sys;
     struct xue_ops *ops;
-    uint32_t xhc_cf8;
 
+    uint32_t xhc_cf8;
     uint64_t xhc_mmio_phys;
     uint64_t xhc_mmio_size;
     uint64_t xhc_dbc_offset;
@@ -587,17 +694,21 @@ static inline void *xue_mcpy(void *dest, const void *src, uint64_t size)
 
 static inline uint32_t xue_pci_read(struct xue *xue, uint32_t cf8, uint32_t reg)
 {
+    void *sys = xue->sys;
     uint32_t addr = (cf8 & 0xFFFFFF03UL) | (reg << 2);
-    xue->ops->outd(0xCF8, addr);
-    return xue->ops->ind(0xCFC);
+
+    xue->ops->outd(sys, 0xCF8, addr);
+    return xue->ops->ind(sys, 0xCFC);
 }
 
 static inline void xue_pci_write(struct xue *xue, uint32_t cf8, uint32_t reg,
                                  uint32_t val)
 {
+    void *sys = xue->sys;
     uint32_t addr = (cf8 & 0xFFFFFF03UL) | (reg << 2);
-    xue->ops->outd(0xCF8, addr);
-    xue->ops->outd(0xCFC, val);
+
+    xue->ops->outd(sys, 0xCF8, addr);
+    xue->ops->outd(sys, 0xCFC, val);
 }
 
 static inline int xue_init_xhc(struct xue *xue)
@@ -606,6 +717,8 @@ static inline int xue_init_xhc(struct xue *xue)
     uint64_t bar1;
     uint64_t devfn;
 
+    struct xue_ops *ops = xue->ops;
+    void *sys = xue->sys;
     xue->xhc_cf8 = 0;
 
     /*
@@ -617,16 +730,6 @@ static inline int xue_init_xhc(struct xue *xue)
         uint32_t fun = devfn & 0x07;
         uint32_t cf8 = (1UL << 31) | (dev << 11) | (fun << 8);
         uint32_t hdr = (xue_pci_read(xue, cf8, 3) & 0xFF0000U) >> 16;
-
-        switch (xue_pci_read(xue, cf8, 0)) {
-        case (XUE_XHC_DEV_Z370 << 16) | XUE_XHC_VEN_INTEL:
-        case (XUE_XHC_DEV_Z390 << 16) | XUE_XHC_VEN_INTEL:
-        case (XUE_XHC_DEV_WILDCAT_POINT << 16) | XUE_XHC_VEN_INTEL:
-        case (XUE_XHC_DEV_SUNRISE_POINT << 16) | XUE_XHC_VEN_INTEL:
-            break;
-        default:
-            continue;
-        }
 
         if (hdr == 0 || hdr == 0x80) {
             if ((xue_pci_read(xue, cf8, 2) >> 8) == XUE_XHC_CLASSC) {
@@ -655,7 +758,7 @@ static inline int xue_init_xhc(struct xue *xue)
     xue_pci_write(xue, xue->xhc_cf8, 4, bar0);
 
     xue->xhc_mmio_phys = (bar0 & 0xFFFFFFF0) | (bar1 << 32);
-    xue->xhc_mmio = xue->ops->map_xhc(xue->xhc_mmio_phys, xue->xhc_mmio_size);
+    xue->xhc_mmio = ops->map_xhc(sys, xue->xhc_mmio_phys, xue->xhc_mmio_size);
 
     return xue->xhc_mmio != NULL;
 }
@@ -793,7 +896,7 @@ static inline void xue_trb_ring_init(const struct xue *xue,
         struct xue_trb *trb = &ring->trb[XUE_TRB_RING_CAP - 1];
         xue_trb_set_type(trb, xue_trb_link);
         xue_trb_link_set_tc(trb);
-        xue_trb_link_set_rsp(trb, xue->ops->virt_to_phys(ring->trb));
+        xue_trb_link_set_rsp(trb, xue->ops->virt_to_dma(xue->sys, ring->trb));
     }
 }
 
@@ -855,8 +958,7 @@ static inline int64_t xue_push_work(struct xue_work_ring *ring, const char *buf,
 
 /*
  * Note that if IN transfer support is added, then this
- * will need to be changed - it assumes 1) an OUT transfer ring only
- * and 2) TRB rings span only one page
+ * will need to be changed; it assumes an OUT transfer ring only
  */
 static inline void xue_pop_events(struct xue *xue)
 {
@@ -889,13 +991,13 @@ static inline void xue_pop_events(struct xue *xue)
 
     erdp &= ~XUE_TRB_RING_MASK;
     erdp |= (er->deq << trb_shift);
-    xue->ops->sfence();
+    xue->ops->sfence(xue->sys);
     xue->dbc_reg->erdp = erdp;
 }
 
 static inline void xue_enable_dbc(struct xue *xue)
 {
-    xue->ops->sfence();
+    xue->ops->sfence(xue->sys);
     xue->dbc_reg->ctrl |= (1UL << XUE_CTRL_DCE);
 }
 
@@ -949,7 +1051,7 @@ static inline void xue_init_strings(struct xue *xue, uint32_t *info)
     xue_mcpy(xue->dbc_str, strings, sizeof(strings));
 
     sda = (uint64_t *)&info[0];
-    sda[0] = xue->ops->virt_to_phys(xue->dbc_str);
+    sda[0] = xue->ops->virt_to_dma(xue->sys, xue->dbc_str);
     sda[1] = sda[0] + 6;
     sda[2] = sda[0] + 6 + 8;
     sda[3] = sda[0] + 6 + 8 + 32;
@@ -959,9 +1061,9 @@ static inline void xue_init_strings(struct xue *xue, uint32_t *info)
 static inline void xue_reset_dbc(struct xue *xue)
 {
     xue->dbc_reg->portsc &= ~(1UL << XUE_PSC_PED);
-    xue->ops->sfence();
+    xue->ops->sfence(xue->sys);
     xue->dbc_reg->ctrl &= ~(1UL << XUE_CTRL_DCE);
-    xue->ops->sfence();
+    xue->ops->sfence(xue->sys);
 }
 
 static inline int xue_init_dbc(struct xue *xue)
@@ -984,7 +1086,7 @@ static inline int xue_init_dbc(struct xue *xue)
     xue_trb_ring_init(xue, &xue->dbc_oring, 1);
     xue_trb_ring_init(xue, &xue->dbc_iring, 1);
 
-    erdp = op->virt_to_phys(xue->dbc_ering.trb);
+    erdp = op->virt_to_dma(xue->sys, xue->dbc_ering.trb);
     if (!erdp) {
         return 0;
     }
@@ -994,8 +1096,8 @@ static inline int xue_init_dbc(struct xue *xue)
     xue->dbc_erst->size = XUE_TRB_RING_CAP;
 
     mbs = (reg->ctrl & 0xFF0000) >> 16;
-    out = op->virt_to_phys(xue->dbc_oring.trb);
-    in = op->virt_to_phys(xue->dbc_iring.trb);
+    out = op->virt_to_dma(xue->sys, xue->dbc_oring.trb);
+    in = op->virt_to_dma(xue->sys, xue->dbc_iring.trb);
 
     xue_mset(xue->dbc_ctx, 0, sizeof(*xue->dbc_ctx));
     xue_init_strings(xue, xue->dbc_ctx->info);
@@ -1003,9 +1105,9 @@ static inline int xue_init_dbc(struct xue *xue)
     xue_init_ep(xue->dbc_ctx->ep_in, mbs, xue_ep_bulk_in, in);
 
     reg->erstsz = 1;
-    reg->erstba = op->virt_to_phys(xue->dbc_erst);
+    reg->erstba = op->virt_to_dma(xue->sys, xue->dbc_erst);
     reg->erdp = erdp;
-    reg->cp = op->virt_to_phys(xue->dbc_ctx);
+    reg->cp = op->virt_to_dma(xue->sys, xue->dbc_ctx);
     reg->ddi1 = (XUE_DBC_VENDOR << 16) | XUE_DBC_PROTOCOL;
     reg->ddi2 = XUE_DBC_PRODUCT;
 
@@ -1020,8 +1122,8 @@ static inline void xue_free_pages(struct xue *xue)
         return;
     }
 
-    ops->free_pages(xue->dbc_erst, 0);
-    ops->free_pages(xue->dbc_ctx, 0);
+    ops->free_pages(xue->sys, xue->dbc_erst, 0);
+    ops->free_pages(xue->sys, xue->dbc_ctx, 0);
 }
 
 static inline void xue_free_dma(struct xue *xue)
@@ -1032,11 +1134,11 @@ static inline void xue_free_dma(struct xue *xue)
         return;
     }
 
-    ops->free_dma(xue->dbc_str, 0);
-    ops->free_dma(xue->dbc_owork.buf, XUE_WORK_RING_ORDER);
-    ops->free_dma(xue->dbc_iring.trb, XUE_TRB_RING_ORDER);
-    ops->free_dma(xue->dbc_oring.trb, XUE_TRB_RING_ORDER);
-    ops->free_dma(xue->dbc_ering.trb, XUE_TRB_RING_ORDER);
+    ops->free_dma(xue->sys, xue->dbc_str, 0);
+    ops->free_dma(xue->sys, xue->dbc_owork.buf, XUE_WORK_RING_ORDER);
+    ops->free_dma(xue->sys, xue->dbc_iring.trb, XUE_TRB_RING_ORDER);
+    ops->free_dma(xue->sys, xue->dbc_oring.trb, XUE_TRB_RING_ORDER);
+    ops->free_dma(xue->sys, xue->dbc_ering.trb, XUE_TRB_RING_ORDER);
 }
 
 static inline int xue_alloc_pages(struct xue *xue)
@@ -1048,14 +1150,14 @@ static inline int xue_alloc_pages(struct xue *xue)
         return 0;
     }
 
-    xue->dbc_ctx = (struct xue_dbc_ctx *)ops->alloc_pages(0);
+    xue->dbc_ctx = (struct xue_dbc_ctx *)ops->alloc_pages(xue->sys, 0);
     if (!xue->dbc_ctx) {
         return 0;
     }
 
-    xue->dbc_erst = (struct xue_erst_segment *)ops->alloc_pages(0);
+    xue->dbc_erst = (struct xue_erst_segment *)ops->alloc_pages(xue->sys, 0);
     if (!xue->dbc_erst) {
-        ops->free_pages(xue->dbc_ctx, 0);
+        ops->free_pages(xue->sys, xue->dbc_ctx, 0);
         return 0;
     }
 
@@ -1064,34 +1166,39 @@ static inline int xue_alloc_pages(struct xue *xue)
 
 static inline int xue_alloc_dma(struct xue *xue)
 {
+    void *sys = xue->sys;
     struct xue_ops *ops = xue->ops;
+
     if (!ops->alloc_dma) {
         return 1;
     } else if (!ops->free_dma) {
         return 0;
     }
 
-    xue->dbc_ering.trb = (struct xue_trb *)ops->alloc_dma(XUE_TRB_RING_ORDER);
+    xue->dbc_ering.trb =
+        (struct xue_trb *)ops->alloc_dma(sys, XUE_TRB_RING_ORDER);
     if (!xue->dbc_ering.trb) {
         return 0;
     }
 
-    xue->dbc_oring.trb = (struct xue_trb *)ops->alloc_dma(XUE_TRB_RING_ORDER);
+    xue->dbc_oring.trb =
+        (struct xue_trb *)ops->alloc_dma(sys, XUE_TRB_RING_ORDER);
     if (!xue->dbc_oring.trb) {
         goto free_etrb;
     }
 
-    xue->dbc_iring.trb = (struct xue_trb *)ops->alloc_dma(XUE_TRB_RING_ORDER);
+    xue->dbc_iring.trb =
+        (struct xue_trb *)ops->alloc_dma(sys, XUE_TRB_RING_ORDER);
     if (!xue->dbc_iring.trb) {
         goto free_otrb;
     }
 
-    xue->dbc_owork.buf = (uint8_t *)ops->alloc_dma(XUE_WORK_RING_ORDER);
+    xue->dbc_owork.buf = (uint8_t *)ops->alloc_dma(sys, XUE_WORK_RING_ORDER);
     if (!xue->dbc_owork.buf) {
         goto free_itrb;
     }
 
-    xue->dbc_str = (char *)ops->alloc_dma(0);
+    xue->dbc_str = (char *)ops->alloc_dma(sys, 0);
     if (!xue->dbc_str) {
         goto free_owrk;
     }
@@ -1099,13 +1206,13 @@ static inline int xue_alloc_dma(struct xue *xue)
     return 1;
 
 free_owrk:
-    ops->free_dma(xue->dbc_owork.buf, XUE_WORK_RING_ORDER);
+    ops->free_dma(sys, xue->dbc_owork.buf, XUE_WORK_RING_ORDER);
 free_itrb:
-    ops->free_dma(xue->dbc_iring.trb, XUE_TRB_RING_ORDER);
+    ops->free_dma(sys, xue->dbc_iring.trb, XUE_TRB_RING_ORDER);
 free_otrb:
-    ops->free_dma(xue->dbc_oring.trb, XUE_TRB_RING_ORDER);
+    ops->free_dma(sys, xue->dbc_oring.trb, XUE_TRB_RING_ORDER);
 free_etrb:
-    ops->free_dma(xue->dbc_ering.trb, XUE_TRB_RING_ORDER);
+    ops->free_dma(sys, xue->dbc_ering.trb, XUE_TRB_RING_ORDER);
 
     return 0;
 }
@@ -1141,6 +1248,7 @@ static inline void xue_free_dbc(struct xue *xue)
 
 static inline void xue_init_ops(struct xue *xue, struct xue_ops *ops)
 {
+    xue_set_op(init);
     xue_set_op(alloc_dma);
     xue_set_op(free_dma);
     xue_set_op(alloc_pages);
@@ -1149,19 +1257,24 @@ static inline void xue_init_ops(struct xue *xue, struct xue_ops *ops)
     xue_set_op(unmap_xhc);
     xue_set_op(outd);
     xue_set_op(ind);
-    xue_set_op(virt_to_phys);
+    xue_set_op(virt_to_dma);
     xue_set_op(sfence);
 
     xue->ops = ops;
 }
 
-static inline int xue_open(struct xue *xue, struct xue_ops *ops)
+static inline int xue_open(struct xue *xue, struct xue_ops *ops, void *sys)
 {
     if (!xue || !ops) {
         return 0;
     }
 
     xue_init_ops(xue, ops);
+    xue->sys = sys;
+
+    if (!ops->init(sys)) {
+        return 0;
+    }
 
     if (!xue_init_xhc(xue)) {
         return 0;
@@ -1173,13 +1286,13 @@ static inline int xue_open(struct xue *xue, struct xue_ops *ops)
 
     if (!xue_init_dbc(xue)) {
         xue_free_dbc(xue);
-        ops->unmap_xhc(xue->xhc_mmio);
+        ops->unmap_xhc(sys, xue->xhc_mmio);
         return 0;
     }
 
     xue->dbc_owork.enq = 0;
     xue->dbc_owork.deq = 0;
-    xue->dbc_owork.phys = ops->virt_to_phys(xue->dbc_owork.buf);
+    xue->dbc_owork.phys = ops->virt_to_dma(sys, xue->dbc_owork.buf);
 
     xue_enable_dbc(xue);
     return 1;
@@ -1198,7 +1311,7 @@ static inline void xue_flush(struct xue *xue, struct xue_trb_ring *trb,
     if (reg->ctrl & (1UL << XUE_CTRL_DRC)) {
         reg->ctrl |= (1UL << XUE_CTRL_DRC);
         reg->portsc |= (1UL << XUE_PSC_PED);
-        xue->ops->sfence();
+        xue->ops->sfence(xue->sys);
     }
 
     if (xue_trb_ring_full(trb)) {
@@ -1219,7 +1332,7 @@ static inline void xue_flush(struct xue *xue, struct xue_trb_ring *trb,
         }
     }
 
-    xue->ops->sfence();
+    xue->ops->sfence(xue->sys);
     xue->dbc_reg->db &= 0xFFFF00FF;
 }
 
@@ -1255,32 +1368,29 @@ static inline int64_t xue_putc(struct xue *xue, char c)
 
 static inline void xue_dump(struct xue *xue)
 {
-    (void)xue;
+    struct xue_ops *op = xue->ops;
+    struct xue_dbc_reg *r = xue->dbc_reg;
 
     xue_debug("XUE DUMP:\n");
-    xue_debug("    ctrl: 0x%x stat: 0x%x psc: 0x%x\n", xue->dbc_reg->ctrl,
-              xue->dbc_reg->st, xue->dbc_reg->portsc);
-
-    xue_debug("    id: 0x%x, db: 0x%x\n", xue->dbc_reg->id, xue->dbc_reg->db);
-    xue_debug("    erstsz: %u, erstba: 0x%llx\n", xue->dbc_reg->erstsz,
-              xue->dbc_reg->erstba);
-    xue_debug("    erdp: 0x%llx, cp: 0x%llx\n", xue->dbc_reg->erdp,
-              xue->dbc_reg->cp);
-    xue_debug("    ddi1: 0x%x, ddi2: 0x%x\n", xue->dbc_reg->ddi1,
-              xue->dbc_reg->ddi2);
-    xue_debug("    erstba == virt_to_phys(erst): %d\n",
-              xue->dbc_reg->erstba == xue->ops->virt_to_phys(xue->dbc_erst));
-    xue_debug("    erdp == virt_to_phys(erst[0].base): %d\n",
-              xue->dbc_reg->erdp == xue->dbc_erst[0].base);
-    xue_debug("    cp == virt_to_phys(ctx): %d\n",
-              xue->dbc_reg->cp == xue->ops->virt_to_phys(xue->dbc_ctx));
+    xue_debug("    ctrl: 0x%x stat: 0x%x psc: 0x%x\n", r->ctrl, r->st,
+              r->portsc);
+    xue_debug("    id: 0x%x, db: 0x%x\n", r->id, r->db);
+    xue_debug("    erstsz: %u, erstba: 0x%llx\n", r->erstsz, r->erstba);
+    xue_debug("    erdp: 0x%llx, cp: 0x%llx\n", r->erdp, r->cp);
+    xue_debug("    ddi1: 0x%x, ddi2: 0x%x\n", r->ddi1, r->ddi2);
+    xue_debug("    erstba == virt_to_dma(erst): %d\n",
+              r->erstba == op->virt_to_dma(xue->sys, xue->dbc_erst));
+    xue_debug("    erdp == virt_to_dma(erst[0].base): %d\n",
+              r->erdp == xue->dbc_erst[0].base);
+    xue_debug("    cp == virt_to_dma(ctx): %d\n",
+              r->cp == op->virt_to_dma(xue->sys, xue->dbc_ctx));
 }
 
 static inline void xue_close(struct xue *xue)
 {
     xue_reset_dbc(xue);
     xue_free_dbc(xue);
-    xue->ops->unmap_xhc(xue->xhc_mmio);
+    xue->ops->unmap_xhc(xue->sys, xue->xhc_mmio);
 }
 
 #ifdef __cplusplus

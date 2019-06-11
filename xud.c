@@ -26,10 +26,7 @@
 
 void _vmcall(uint64_t rax, uint64_t rbx, uint64_t rcx, uint64_t rdx);
 
-static inline void test(uint64_t rax)
-{
-    _vmcall(rax, 0, 0, 0);
-}
+static inline void test(uint64_t rax) { _vmcall(rax, 0, 0, 0); }
 
 int main(int argc, char **argv)
 {
