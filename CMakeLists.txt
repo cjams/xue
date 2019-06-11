@@ -48,7 +48,13 @@ if(BUILD_TESTS)
     add_library(catch test/catch.cpp)
     add_executable(test_xue test/test_xue.cpp)
 
-    target_link_libraries(test_xue catch)
+    target_link_libraries(test_xue PRIVATE catch)
+    target_link_options(test_xue PRIVATE
+        -fuse-ld=gold -fsanitize=address -fsanitize=leak
+        -fsanitize=undefined)
+    target_compile_options(test_xue PRIVATE
+        -O1 -fno-omit-frame-pointer -fuse-ld=gold
+        -fsanitize=address -fsanitize=leak -fsanitize=undefined)
     target_compile_definitions(test_xue PRIVATE XUE_TEST)
     target_include_directories(test_xue PRIVATE ${XUE_INCLUDE})
 
