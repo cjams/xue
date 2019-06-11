@@ -81,18 +81,13 @@ static inline int known_xhc(uint32_t dev_ven)
 extern "C" {
 static inline int xue_sys_init(void *) { return 1; }
 static inline void xue_sys_sfence(void *) {}
-static inline void *xue_sys_map_xhc(void *sys, uint64_t, uint64_t)
-{
-    return NULL;
-}
+static inline void *xue_sys_map_xhc(void *, uint64_t, uint64_t) { return NULL; }
 static inline void xue_sys_unmap_xhc(void *sys, void *) {}
-static inline void *xue_sys_alloc_pages(void *sys, uint64_t) { return NULL; }
-static inline void *xue_sys_alloc_dma(void *sys, uint64_t) { return NULL; }
-static inline void xue_sys_free_pages(void *sys, void *, uint64_t) {}
+static inline void *xue_sys_alloc_dma(void *, uint64_t) { return NULL; }
 static inline void xue_sys_free_dma(void *sys, void *, uint64_t) {}
 static inline void xue_sys_outd(void *sys, uint32_t, uint32_t) {}
-static inline uint32_t xue_sys_ind(void *sys, uint32_t) { return 0; }
-static inline uint64_t xue_sys_virt_to_dma(void *sys, const void *virt)
+static inline uint32_t xue_sys_ind(void *, uint32_t) { return 0; }
+static inline uint64_t xue_sys_virt_to_dma(void *, const void *virt)
 {
     return (uint64_t)virt;
 }
@@ -106,9 +101,8 @@ static inline uint64_t xue_sys_virt_to_dma(void *sys, const void *virt)
 #include <cstdio>
 #include <debug/serial/serial_ns16550a.h>
 #include <debug/serial/serial_pl011.h>
-#include <memory_manager/memory_manager.h>
 
-#define __xue_printf(...)                                                      \
+#define xue_printf(...)                                                        \
     do {                                                                       \
         char buf[256];                                                         \
         snprintf(buf, 256, __VA_ARGS__);                                       \
@@ -121,9 +115,9 @@ static inline uint64_t xue_sys_virt_to_dma(void *sys, const void *virt)
         }                                                                      \
     } while (0)
 
-#define xue_debug(...) __xue_printf("xue debug: " __VA_ARGS__)
-#define xue_alert(...) __xue_printf("xue alert: " __VA_ARGS__)
-#define xue_error(...) __xue_printf("xue error: " __VA_ARGS__)
+#define xue_debug(...) xue_printf("xue debug: " __VA_ARGS__)
+#define xue_alert(...) xue_printf("xue alert: " __VA_ARGS__)
+#define xue_error(...) xue_printf("xue error: " __VA_ARGS__)
 
 #ifdef __cplusplus
 extern "C" {
@@ -138,21 +132,10 @@ static inline uint64_t xue_sys_virt_to_dma(void *sys, const void *virt)
     return 0;
 }
 
-static inline void *xue_sys_alloc_pages(void *sys, uint64_t order)
-{
-    xue_error("%s should not be called from the VMM\n", __func__);
-    return NULL;
-}
-
 static inline void *xue_sys_alloc_dma(void *sys, uint64_t order)
 {
     xue_error("%s should not be called from the VMM\n", __func__);
     return NULL;
-}
-
-static inline void xue_sys_free_pages(void *sys, void *addr, uint64_t order)
-{
-    xue_error("%s should not be called from the VMM\n", __func__);
 }
 
 static inline void xue_sys_free_dma(void *sys, void *addr, uint64_t order)
@@ -211,16 +194,6 @@ static inline void *xue_sys_alloc_dma(void *sys, uint64_t order)
 }
 
 static inline void xue_sys_free_dma(void *sys, void *addr, uint64_t order)
-{
-    free_pages((unsigned long)addr, order);
-}
-
-static inline void *xue_sys_alloc_pages(void *sys, uint64_t order)
-{
-    return (void *)__get_free_pages(GFP_KERNEL, order);
-}
-
-static inline void xue_sys_free_pages(void *sys, void *addr, uint64_t order)
 {
     free_pages((unsigned long)addr, order);
 }
@@ -285,10 +258,21 @@ typedef INT_PTR intptr_t;
 #define xue_alert(...) Print(L"xue alert: " __VA_ARGS__)
 #define xue_error(...) Print(L"xue error: " __VA_ARGS__)
 
+/* NOTE: see xue_alloc_dma for the number of buffers created by alloc_dma */
+#define XUE_DMA_DESC_CAP 7
+
+struct xue_efi_dma {
+    UINTN pages;
+    EFI_PHYSICAL_ADDRESS dma_addr;
+    VOID *cpu_addr;
+    VOID *mapping;
+};
+
 struct xue_efi {
     EFI_HANDLE img_hand;
     EFI_HANDLE pci_hand;
     EFI_PCI_IO *pci_io;
+    struct xue_efi_dma dma_desc[XUE_DMA_DESC_CAP];
 };
 
 static inline int xue_sys_init(void *sys)
@@ -299,10 +283,11 @@ static inline int xue_sys_init(void *sys)
     UINTN i;
 
     struct xue_efi *efi = (struct xue_efi *)sys;
+    ZeroMem((VOID *)&efi->dma_desc, sizeof(efi->dma_desc));
 
     rc = LibLocateHandle(ByProtocol, &PciIoProtocol, NULL, &nr_hand, &hand);
     if (EFI_ERROR(rc)) {
-        xue_error("%s: LocateHandle failed: 0x%llx\n", __func__, rc);
+        xue_error("LocateHandle failed: 0x%llx\n", rc);
         return 0;
     }
 
@@ -330,7 +315,7 @@ static inline int xue_sys_init(void *sys)
         }
     }
 
-    xue_error("%s: Failed to open PCI_IO_PROTOCOL on any known xHC\n");
+    xue_error("Failed to open PCI_IO_PROTOCOL on any known xHC\n");
     return 0;
 }
 
@@ -338,69 +323,127 @@ static inline void *xue_sys_alloc_dma(void *sys, uint64_t order)
 {
     const EFI_ALLOCATE_TYPE atype = AllocateAnyPages;
     const EFI_MEMORY_TYPE mtype = EfiRuntimeServicesData;
-    const UINTN pages = 1UL << order;
     const UINTN attrs = EFI_PCI_ATTRIBUTE_MEMORY_CACHED;
+    const UINTN pages = 1UL << order;
+
+    struct xue_efi_dma *dma = NULL;
     struct xue_efi *efi = (struct xue_efi *)sys;
     EFI_PCI_IO *pci = efi->pci_io;
+    EFI_STATUS rc = 0;
     VOID *addr = NULL;
+    UINTN i = 0;
 
-    EFI_STATUS rc = pci->AllocateBuffer(pci, atype, mtype, pages, &addr, attrs);
-    if (EFI_ERROR(rc)) {
-        xue_error("%s: AllocateBuffer failed: 0x%llx\n", rc);
+    for (; i < XUE_DMA_DESC_CAP; i++) {
+        dma = &efi->dma_desc[i];
+        if (!dma->cpu_addr) {
+            break;
+        }
+        dma = NULL;
+    }
+
+    if (!dma) {
+        xue_error("Out of DMA descriptors\n");
         return NULL;
     }
 
+    rc = pci->AllocateBuffer(pci, atype, mtype, pages, &addr, attrs);
+    if (EFI_ERROR(rc)) {
+        xue_error("AllocateBuffer failed: 0x%llx\n", rc);
+        return NULL;
+    }
+
+    dma->pages = pages;
+    dma->cpu_addr = addr;
+
+    xue_debug("dma allocated: addr: 0x%llx pages: %u\n", addr, pages);
     return addr;
 }
 
 static inline void xue_sys_free_dma(void *sys, void *addr, uint64_t order)
 {
-    const UINTN pages = 1UL << order;
+    (void)order;
+
+    struct xue_efi_dma *dma = NULL;
     struct xue_efi *efi = (struct xue_efi *)sys;
     EFI_PCI_IO *pci = efi->pci_io;
+    EFI_STATUS rc = 0;
+    UINTN i = 0;
 
-    /* TODO - ensure addr is Unmap()'d prior to freeing */
-    EFI_STATUS rc = pci->FreeBuffer(pci, pages, addr);
-    if (EFI_ERROR(rc)) {
-        xue_error("%s: FreeBuffer failed: 0x%llx\n", rc);
-    }
-}
-
-static inline void *xue_sys_alloc_pages(void *sys, uint64_t order)
-{
-    (void)sys;
-
-    const EFI_ALLOCATE_TYPE atype = AllocateAnyPages;
-    const EFI_MEMORY_TYPE mtype = EfiRuntimeServicesData;
-    const UINTN pages = 1UL << order;
-    EFI_PHYSICAL_ADDRESS addr = 0;
-
-    EFI_STATUS rc = gBS->AllocatePages(atype, mtype, pages, &addr);
-    if (EFI_ERROR(rc)) {
-        xue_error("AllocatePages failed: 0x%llx\n", rc);
-        return NULL;
+    for (; i < XUE_DMA_DESC_CAP; i++) {
+        dma = &efi->dma_desc[i];
+        if (dma->cpu_addr == addr) {
+            break;
+        }
+        dma = NULL;
     }
 
-    return (void *)addr;
-}
-
-static inline void xue_sys_free_pages(void *sys, void *addr, uint64_t order)
-{
-    (void)sys;
-    const UINTN pages = 1UL << order;
-
-    EFI_STATUS rc = gBS->FreePages((EFI_PHYSICAL_ADDRESS)addr, pages);
-    if (EFI_ERROR(rc)) {
-        xue_error("FreePages failed: 0x%llx\n", rc);
+    if (!dma) {
+        return;
     }
+
+    if (dma->mapping) {
+        rc = pci->Unmap(pci, dma->mapping);
+        if (EFI_ERROR(rc)) {
+            xue_error("pci->Unmap failed: 0x%llx\n", rc);
+        }
+    }
+
+    rc = pci->FreeBuffer(pci, dma->pages, addr);
+    if (EFI_ERROR(rc)) {
+        xue_error("FreeBuffer failed: 0x%llx\n", rc);
+    }
+
+    ZeroMem((VOID *)dma, sizeof(*dma));
 }
 
-static inline void *xue_sys_map_xhc(void *sys, uint64_t phys, uint64_t count)
+static inline uint64_t xue_sys_virt_to_dma(void *sys, const void *virt)
 {
-    (void)sys;
-    (void)count;
+    UINTN i = 0;
+    UINTN needed = 0;
+    UINTN mapped = 0;
+    struct xue_efi *efi = (struct xue_efi *)sys;
+    struct xue_efi_dma *dma = NULL;
+    EFI_PHYSICAL_ADDRESS dma_addr = 0;
+    EFI_PCI_IO *pci = efi->pci_io;
+    EFI_STATUS rc = 0;
+    VOID *mapping = NULL;
 
-    return (void *)phys;
+    for (i = 0; i < XUE_DMA_DESC_CAP; i++) {
+        dma = &efi->dma_desc[i];
+        if (dma->cpu_addr == virt) {
+            break;
+        }
+        dma = NULL;
+    }
+
+    if (!dma) {
+        xue_error("CPU addr 0x%llx not found in DMA descriptor\n", virt);
+        return 0;
+    }
+
+    if (dma->dma_addr && dma->mapping) {
+        return dma->dma_addr;
+    }
+
+    needed = dma->pages << EFI_PAGE_SHIFT;
+    mapped = needed;
+    rc = pci->Map(pci, EfiPciIoOperationBusMasterCommonBuffer, (void *)virt,
+                  &mapped, &dma_addr, &mapping);
+    if (EFI_ERROR(rc) || mapped != needed) {
+        xue_error("pci->Map failed: rc: 0x%llx, mapped: %llu, needed: %llu\n",
+                  rc, mapped, needed);
+        return 0;
+    }
+
+    dma->dma_addr = dma_addr;
+    dma->mapping = mapping;
+
+    if ((const void *)dma_addr != virt) {
+        xue_alert("Non-identity DMA mapping: dma: 0x%llx cpu: 0x%llx\n",
+                  dma_addr, virt);
+    }
+
+    return dma_addr;
 }
 
 static inline void xue_sys_outd(void *sys, uint32_t port, uint32_t val)
@@ -427,10 +470,12 @@ static inline uint32_t xue_sys_ind(void *sys, uint32_t port)
     return ret;
 }
 
-static inline uint64_t xue_sys_virt_to_dma(void *sys, const void *virt)
+static inline void *xue_sys_map_xhc(void *sys, uint64_t phys, uint64_t count)
 {
     (void)sys;
-    return (uint64_t)virt;
+    (void)count;
+
+    return (void *)phys;
 }
 
 static inline void xue_sys_unmap_xhc(void *sys, void *virt)
@@ -573,33 +618,17 @@ struct xue_ops {
      * alloc_dma
      *
      * @param order - allocate 2^order pages suitable for read/write DMA
-     * @return the allocated pages
+     * @return a cpu-relative virtual address for accessing the DMA buffer
      */
     void *(*alloc_dma)(void *sys, uint64_t order);
 
     /**
      * free_dma (must be != NULL if alloc_dma != NULL)
      *
-     * @param addr the base address of the pages to free
+     * @param addr the cpu-relative address of the DMA range to free
      * @param order the order of the set of pages to free
      */
     void (*free_dma)(void *sys, void *addr, uint64_t order);
-
-    /**
-     * alloc_pages
-     *
-     * @param order - allocate 2^order pages
-     * @return the allocated pages
-     */
-    void *(*alloc_pages)(void *sys, uint64_t order);
-
-    /**
-     * free_pages (must be != NULL if alloc_pages != NULL)
-     *
-     * @param addr the base address of the pages to free
-     * @param order the order of the set of pages to free
-     */
-    void (*free_pages)(void *sys, void *addr, uint64_t order);
 
     /**
      * map_xhc - map in the xHC MMIO region as UC memory
@@ -634,10 +663,10 @@ struct xue_ops {
     uint32_t (*ind)(void *sys, uint32_t port);
 
     /**
-     * virt_to_dma - translate a virtual address to a physical address
+     * virt_to_dma - translate a virtual address to a DMA address
      *
-     * @param virt the virtual address to translate
-     * @return the resulting physical address
+     * @param virt the address returned from a previous alloc_dma call
+     * @return the resulting bus-relative DMA address
      */
     uint64_t (*virt_to_dma)(void *sys, const void *virt);
 
@@ -1114,18 +1143,6 @@ static inline int xue_init_dbc(struct xue *xue)
     return 1;
 }
 
-static inline void xue_free_pages(struct xue *xue)
-{
-    struct xue_ops *ops = xue->ops;
-
-    if (!ops->free_pages) {
-        return;
-    }
-
-    ops->free_pages(xue->sys, xue->dbc_erst, 0);
-    ops->free_pages(xue->sys, xue->dbc_ctx, 0);
-}
-
 static inline void xue_free_dma(struct xue *xue)
 {
     struct xue_ops *ops = xue->ops;
@@ -1139,29 +1156,8 @@ static inline void xue_free_dma(struct xue *xue)
     ops->free_dma(xue->sys, xue->dbc_iring.trb, XUE_TRB_RING_ORDER);
     ops->free_dma(xue->sys, xue->dbc_oring.trb, XUE_TRB_RING_ORDER);
     ops->free_dma(xue->sys, xue->dbc_ering.trb, XUE_TRB_RING_ORDER);
-}
-
-static inline int xue_alloc_pages(struct xue *xue)
-{
-    struct xue_ops *ops = xue->ops;
-    if (!ops->alloc_pages) {
-        return 1;
-    } else if (!ops->free_pages) {
-        return 0;
-    }
-
-    xue->dbc_ctx = (struct xue_dbc_ctx *)ops->alloc_pages(xue->sys, 0);
-    if (!xue->dbc_ctx) {
-        return 0;
-    }
-
-    xue->dbc_erst = (struct xue_erst_segment *)ops->alloc_pages(xue->sys, 0);
-    if (!xue->dbc_erst) {
-        ops->free_pages(xue->sys, xue->dbc_ctx, 0);
-        return 0;
-    }
-
-    return 1;
+    ops->free_dma(xue->sys, xue->dbc_erst, 0);
+    ops->free_dma(xue->sys, xue->dbc_ctx, 0);
 }
 
 static inline int xue_alloc_dma(struct xue *xue)
@@ -1175,10 +1171,20 @@ static inline int xue_alloc_dma(struct xue *xue)
         return 0;
     }
 
+    xue->dbc_ctx = (struct xue_dbc_ctx *)ops->alloc_dma(xue->sys, 0);
+    if (!xue->dbc_ctx) {
+        return 0;
+    }
+
+    xue->dbc_erst = (struct xue_erst_segment *)ops->alloc_dma(xue->sys, 0);
+    if (!xue->dbc_erst) {
+        goto free_ctx;
+    }
+
     xue->dbc_ering.trb =
         (struct xue_trb *)ops->alloc_dma(sys, XUE_TRB_RING_ORDER);
     if (!xue->dbc_ering.trb) {
-        return 0;
+        goto free_erst;
     }
 
     xue->dbc_oring.trb =
@@ -1213,31 +1219,25 @@ free_otrb:
     ops->free_dma(sys, xue->dbc_oring.trb, XUE_TRB_RING_ORDER);
 free_etrb:
     ops->free_dma(sys, xue->dbc_ering.trb, XUE_TRB_RING_ORDER);
+free_erst:
+    ops->free_dma(sys, xue->dbc_erst, 0);
+free_ctx:
+    ops->free_dma(sys, xue->dbc_ctx, 0);
 
     return 0;
 }
 
 static inline int xue_alloc_dbc(struct xue *xue)
 {
-    if (!xue_alloc_pages(xue)) {
-        xue_error("xue_alloc_pages failed\n");
-        return 0;
-    }
-
     if (!xue_alloc_dma(xue)) {
         xue_error("xue_alloc_dma failed\n");
-        xue_free_pages(xue);
         return 0;
     }
 
     return 1;
 }
 
-static inline void xue_free_dbc(struct xue *xue)
-{
-    xue_free_dma(xue);
-    xue_free_pages(xue);
-}
+static inline void xue_free_dbc(struct xue *xue) { xue_free_dma(xue); }
 
 #define xue_set_op(op)                                                         \
     do {                                                                       \
@@ -1251,8 +1251,6 @@ static inline void xue_init_ops(struct xue *xue, struct xue_ops *ops)
     xue_set_op(init);
     xue_set_op(alloc_dma);
     xue_set_op(free_dma);
-    xue_set_op(alloc_pages);
-    xue_set_op(free_pages);
     xue_set_op(map_xhc);
     xue_set_op(unmap_xhc);
     xue_set_op(outd);

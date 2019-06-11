@@ -48,7 +48,7 @@ uint32_t pci_reg{};
 
 std::array<uint32_t, 64> xhc_cfg{};
 std::array<uint8_t, xhc_mmio_size> xhc_mmio{};
-std::array<uint32_t, 4> known_xhc{
+std::array<uint32_t, 4> known_xhc_list{
     (XUE_XHC_DEV_Z370 << 16) | XUE_XHC_VEN_INTEL,
     (XUE_XHC_DEV_Z390 << 16) | XUE_XHC_VEN_INTEL,
     (XUE_XHC_DEV_WILDCAT_POINT << 16) | XUE_XHC_VEN_INTEL,
@@ -58,8 +58,10 @@ std::array<uint32_t, 4> known_xhc{
 constexpr auto dbc_offset = 0x8000U;
 struct xue_dbc_reg *dbc_regs{};
 
-static void *alloc_pages(uint64_t order)
+static void *alloc_dma(void *sys, uint64_t order)
 {
+    (void)sys;
+
     const int prot = PROT_READ | PROT_WRITE;
     const int flag = MAP_PRIVATE | MAP_ANON | MAP_POPULATE;
     const int size = XUE_PAGE_SIZE << order;
@@ -73,31 +75,25 @@ static void *alloc_pages(uint64_t order)
     return ret;
 }
 
-static void *alloc_dma(uint64_t order)
+static void free_dma(void *sys, void *addr, uint64_t order)
 {
-    return alloc_pages(order);
-}
-
-static void free_pages(void *addr, uint64_t order)
-{
+    (void)sys;
     munmap(addr, XUE_PAGE_SIZE << order);
 }
 
-static void free_dma(void *addr, uint64_t order)
+static void *map_xhc(void *sys, uint64_t phys, size_t size)
 {
-    free_pages(addr, order);
-}
-
-static void *map_xhc(uint64_t phys, size_t size)
-{
+    (void)sys;
     (void)phys;
     (void)size;
 
     return reinterpret_cast<void *>(xhc_mmio.data());
 }
 
-static uint32_t ind(uint32_t port)
+static uint32_t ind(void *sys, uint32_t port)
 {
+    (void)sys;
+
     if (port != 0xCFC || pci_bdf != xhc_bdf) {
         return 0;
     }
@@ -105,8 +101,10 @@ static uint32_t ind(uint32_t port)
     return xhc_cfg.at(pci_reg);
 }
 
-static void outd(uint32_t port, uint32_t data)
+static void outd(void *sys, uint32_t port, uint32_t data)
 {
+    (void)sys;
+
     if (port == 0xCF8) {
         pci_bdf = data & 0xFFFFFF00;
         pci_reg = (data & 0xFC) >> 2;
@@ -139,9 +137,7 @@ static void clear_mmio()
 static void setup_ops(struct xue_ops *ops)
 {
     ops->alloc_dma = alloc_dma;
-    ops->alloc_pages = alloc_pages;
     ops->free_dma = free_dma;
-    ops->free_pages = free_pages;
     ops->map_xhc = map_xhc;
     ops->ind = ind;
     ops->outd = outd;
@@ -193,9 +189,9 @@ TEST_CASE("xue_open - invalid args")
     struct xue xue{};
     struct xue_ops ops{};
 
-    CHECK(xue_open(NULL, NULL) == 0);
-    CHECK(xue_open(&xue, NULL) == 0);
-    CHECK(xue_open(NULL, &ops) == 0);
+    CHECK(xue_open(NULL, NULL, NULL) == 0);
+    CHECK(xue_open(&xue, NULL, NULL) == 0);
+    CHECK(xue_open(NULL, &ops, NULL) == 0);
 }
 
 TEST_CASE("xue_open - init ops")
@@ -203,17 +199,15 @@ TEST_CASE("xue_open - init ops")
     struct xue xue{};
     struct xue_ops ops{};
 
-    CHECK(xue_open(&xue, &ops) == 0);
+    CHECK(xue_open(&xue, &ops, NULL) == 0);
 
     CHECK(xue.ops->alloc_dma == xue_sys_alloc_dma);
     CHECK(xue.ops->free_dma == xue_sys_free_dma);
-    CHECK(xue.ops->alloc_pages == xue_sys_alloc_pages);
-    CHECK(xue.ops->free_pages == xue_sys_free_pages);
     CHECK(xue.ops->map_xhc == xue_sys_map_xhc);
     CHECK(xue.ops->unmap_xhc == xue_sys_unmap_xhc);
     CHECK(xue.ops->outd == xue_sys_outd);
     CHECK(xue.ops->ind == xue_sys_ind);
-    CHECK(xue.ops->virt_to_phys == xue_sys_virt_to_phys);
+    CHECK(xue.ops->virt_to_dma == xue_sys_virt_to_dma);
     CHECK(xue.ops->sfence == xue_sys_sfence);
 }
 
@@ -229,9 +223,9 @@ TEST_CASE("xue_open - alloc failure")
     setup_pci();
     setup_mmio();
 
-    for (auto dev_ven : known_xhc) {
+    for (auto dev_ven : known_xhc_list) {
         xhc_cfg.at(0) = dev_ven;
-        CHECK(xue_open(&xue, &ops) == 0);
+        CHECK(xue_open(&xue, &ops, NULL) == 0);
     }
 }
 
@@ -244,9 +238,9 @@ TEST_CASE("xue_open - init_dbc failure")
     setup_pci();
     clear_mmio();
 
-    for (auto dev_ven : known_xhc) {
+    for (auto dev_ven : known_xhc_list) {
         xhc_cfg.at(0) = dev_ven;
-        CHECK(xue_open(&xue, &ops) == 0);
+        CHECK(xue_open(&xue, &ops, NULL) == 0);
     }
 }
 
@@ -259,9 +253,9 @@ TEST_CASE("xue_open - success")
     setup_pci();
     setup_mmio();
 
-    for (auto dev_ven : known_xhc) {
+    for (auto dev_ven : known_xhc_list) {
         xhc_cfg.at(0) = dev_ven;
-        CHECK(xue_open(&xue, &ops) == 1);
+        CHECK(xue_open(&xue, &ops, NULL) == 1);
         xue_close(&xue);
     }
 }
@@ -271,7 +265,7 @@ TEST_CASE("xue_init_xhc - not found")
     struct xue xue{};
     struct xue_ops ops{};
 
-    ops.ind = +[](uint32_t /*port*/) { return 0U; };
+    ops.ind = +[](void *, uint32_t) { return 0U; };
     xue_init_ops(&xue, &ops);
 
     CHECK(xue_init_xhc(&xue) == 0);
@@ -288,7 +282,7 @@ TEST_CASE("xue_init_xhc - invalid header")
 
     xhc_cfg.at(3) = 0xFF0000;
 
-    for (auto dev_ven : known_xhc) {
+    for (auto dev_ven : known_xhc_list) {
         xhc_cfg.at(0) = dev_ven;
         CHECK(xue_init_xhc(&xue) == 0);
     }
@@ -306,7 +300,7 @@ TEST_CASE("xue_init_xhc - invalid class code")
     xhc_cfg.at(2) = (XUE_XHC_CLASSC << 8) + 1;
     xhc_cfg.at(3) = 0;
 
-    for (auto dev_ven : known_xhc) {
+    for (auto dev_ven : known_xhc_list) {
         xhc_cfg.at(0) = dev_ven;
         CHECK(xue_init_xhc(&xue) == 0);
     }
@@ -325,13 +319,13 @@ TEST_CASE("xue_init_xhc - invalid BAR")
     xhc_cfg.at(3) = 0;
 
     xhc_cfg.at(4) = 1;
-    for (auto dev_ven : known_xhc) {
+    for (auto dev_ven : known_xhc_list) {
         xhc_cfg.at(0) = dev_ven;
         CHECK(xue_init_xhc(&xue) == 0);
     }
 
     xhc_cfg.at(4) = 0;
-    for (auto dev_ven : known_xhc) {
+    for (auto dev_ven : known_xhc_list) {
         xhc_cfg.at(0) = dev_ven;
         CHECK(xue_init_xhc(&xue) == 0);
     }
@@ -349,7 +343,7 @@ TEST_CASE("xue_init_xhc - success")
     xue_init_ops(&xue, &ops);
     setup_pci();
 
-    for (auto dev_ven : known_xhc) {
+    for (auto dev_ven : known_xhc_list) {
         xhc_cfg.at(0) = dev_ven;
         CHECK(xue_init_xhc(&xue) != 0);
     }
@@ -510,9 +504,9 @@ TEST_CASE("xue_flush")
     setup_pci();
     setup_mmio();
 
-    for (auto dev_ven : known_xhc) {
+    for (auto dev_ven : known_xhc_list) {
         xhc_cfg.at(0) = dev_ven;
-        CHECK(xue_open(&xue, &ops) == 1);
+        CHECK(xue_open(&xue, &ops, NULL) == 1);
 
         dbc_regs->ctrl &= ~(1UL << XUE_CTRL_DCR);
         CHECK((xue.dbc_reg->ctrl & (1UL << XUE_CTRL_DCR)) == 0);
@@ -577,10 +571,10 @@ TEST_CASE("xue_write")
 
     char buf[4] = {'f', 'o', 'o', 0};
 
-    for (auto dev_ven : known_xhc) {
+    for (auto dev_ven : known_xhc_list) {
         struct xue xue{};
         xhc_cfg.at(0) = dev_ven;
-        CHECK(xue_open(&xue, &ops) == 1);
+        CHECK(xue_open(&xue, &ops, NULL) == 1);
 
         CHECK(xue_write(&xue, NULL, 1) == 0);
         CHECK(xue_write(&xue, buf, 0) == 0);
