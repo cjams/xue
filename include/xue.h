@@ -489,6 +489,63 @@ static inline void xue_sys_sfence(void *sys)
     (void)sys;
     __asm volatile("sfence");
 }
+#endif
+
+#if defined(__XEN__)
+
+#include <asm/fixmap.h>
+#include <asm/io.h>
+#include <xen/mm.h>
+#include <xen/types.h>
+
+#define xue_debug(...) printk("xue debug: " __VA_ARGS__)
+#define xue_alert(...) printk("xue alert: " __VA_ARGS__)
+#define xue_error(...) printk("xue error: " __VA_ARGS__)
+
+static inline int xue_sys_init(void *sys) { return 1; }
+static inline void xue_sys_sfence(void *sys) { wmb(); }
+static inline void xue_sys_unmap_xhc(void *sys, void *virt) {}
+static inline void xue_sys_free_dma(void *sys, void *addr, uint64_t order) {}
+
+static inline void *xue_sys_alloc_dma(void *sys, uint64_t order)
+{
+    return NULL;
+}
+
+static inline uint32_t xue_sys_ind(void *sys, uint32_t port)
+{
+    return inl(port);
+}
+
+static inline void xue_sys_outd(void *sys, uint32_t port, uint32_t data)
+{
+    outl(data, port);
+}
+
+static inline uint64_t xue_sys_virt_to_dma(void *sys, const void *virt)
+{
+    return virt_to_maddr(virt);
+}
+
+static void *xue_sys_map_xhc(void *sys, uint64_t phys, uint64_t size)
+{
+    size_t i;
+
+    if (size != MAX_XHCI_PAGES * XUE_PAGE_SIZE) {
+        return NULL;
+    }
+
+    for (i = FIX_XHCI_END; i >= FIX_XHCI_BEGIN; i--) {
+        set_fixmap_nocache(i, phys);
+        phys += XUE_PAGE_SIZE;
+    }
+
+    /*
+     * The fixmap grows downward, so the lowest virt is
+     * at the highest index
+     */
+    return fix_to_virt(FIX_XHCI_END);
+}
 
 #endif
 
@@ -694,6 +751,7 @@ struct xue {
     struct xue_trb_ring dbc_iring;
     struct xue_work_ring dbc_owork;
     char *dbc_str;
+    int dma_allocated;
 };
 
 static inline void *xue_mset(void *dest, int c, uint64_t size)
@@ -1158,12 +1216,18 @@ static inline void xue_free_dma(struct xue *xue)
     ops->free_dma(xue->sys, xue->dbc_ering.trb, XUE_TRB_RING_ORDER);
     ops->free_dma(xue->sys, xue->dbc_erst, 0);
     ops->free_dma(xue->sys, xue->dbc_ctx, 0);
+
+    xue->dma_allocated = 0;
 }
 
 static inline int xue_alloc_dma(struct xue *xue)
 {
     void *sys = xue->sys;
     struct xue_ops *ops = xue->ops;
+
+    if (xue->dma_allocated) {
+        return 1;
+    }
 
     if (!ops->alloc_dma) {
         return 1;
@@ -1209,6 +1273,7 @@ static inline int xue_alloc_dma(struct xue *xue)
         goto free_owrk;
     }
 
+    xue->dma_allocated = 1;
     return 1;
 
 free_owrk:
@@ -1373,8 +1438,8 @@ static inline void xue_dump(struct xue *xue)
     xue_debug("    ctrl: 0x%x stat: 0x%x psc: 0x%x\n", r->ctrl, r->st,
               r->portsc);
     xue_debug("    id: 0x%x, db: 0x%x\n", r->id, r->db);
-    xue_debug("    erstsz: %u, erstba: 0x%llx\n", r->erstsz, r->erstba);
-    xue_debug("    erdp: 0x%llx, cp: 0x%llx\n", r->erdp, r->cp);
+    xue_debug("    erstsz: %u, erstba: 0x%lx\n", r->erstsz, r->erstba);
+    xue_debug("    erdp: 0x%lx, cp: 0x%lx\n", r->erdp, r->cp);
     xue_debug("    ddi1: 0x%x, ddi2: 0x%x\n", r->ddi1, r->ddi2);
     xue_debug("    erstba == virt_to_dma(erst): %d\n",
               r->erstba == op->virt_to_dma(xue->sys, xue->dbc_erst));
