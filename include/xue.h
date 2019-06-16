@@ -1128,7 +1128,7 @@ static inline void xue_init_strings(struct xue *xue, uint32_t *info)
     const char strings[] = {
         6,  3, 9, 0, 4, 0,
         8,  3, 'A', 0, 'I', 0, 'S', 0,
-        32, 3, 'x', 0, 'H', 0, 'C', 0, 'I', 0, ' ', 0,
+        30, 3, 'X', 0, 'u', 0, 'e', 0, ' ', 0,
                'D', 0, 'b', 0, 'C', 0, ' ', 0,
                'D', 0, 'r', 0, 'i', 0, 'v', 0, 'e', 0, 'r', 0,
         4, 3, '0', 0
@@ -1141,8 +1141,8 @@ static inline void xue_init_strings(struct xue *xue, uint32_t *info)
     sda[0] = xue->ops->virt_to_dma(xue->sys, xue->dbc_str);
     sda[1] = sda[0] + 6;
     sda[2] = sda[0] + 6 + 8;
-    sda[3] = sda[0] + 6 + 8 + 32;
-    info[8] = (4 << 24) | (32 << 16) | (8 << 8) | 6;
+    sda[3] = sda[0] + 6 + 8 + 30;
+    info[8] = (4 << 24) | (30 << 16) | (8 << 8) | 6;
 }
 
 static inline void xue_reset_dbc(struct xue *xue)
