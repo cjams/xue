@@ -648,9 +648,9 @@ struct xue_trb_ring {
     uint8_t db; /* Doorbell target */
 };
 
-#define XUE_DB_OUT 0
-#define XUE_DB_IN 1
-#define XUE_DB_INVAL -1
+#define XUE_DB_OUT 0x0
+#define XUE_DB_IN 0x1
+#define XUE_DB_INVAL 0xFF
 
 /* Defines the size in bytes of work rings as 2^XUE_WORK_RING_ORDER * 4096 */
 #ifndef XUE_WORK_RING_ORDER
@@ -974,8 +974,8 @@ static inline void xue_trb_link_set_tc(struct xue_trb *trb)
 }
 
 static inline void xue_trb_ring_init(const struct xue *xue,
-                                     struct xue_trb_ring *ring,
-                                     int producer, int doorbell)
+                                     struct xue_trb_ring *ring, int producer,
+                                     int doorbell)
 {
     xue_mset(ring->trb, 0, XUE_TRB_RING_CAP * sizeof(ring->trb[0]));
 

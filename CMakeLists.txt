@@ -46,8 +46,9 @@ if(BUILD_TESTS)
     find_package(Catch2 REQUIRED)
 
     add_library(catch test/catch.cpp)
-    add_executable(test_xue test/test_xue.cpp)
+    target_compile_features(catch PUBLIC cxx_std_17)
 
+    add_executable(test_xue test/test_xue.cpp)
     target_link_libraries(test_xue PRIVATE catch)
     target_link_options(test_xue PRIVATE
         -fuse-ld=gold -fsanitize=address -fsanitize=leak

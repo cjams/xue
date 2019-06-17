@@ -24,8 +24,6 @@
 # $2 == clang-format binary
 
 pushd $1
-
 find . -name "*.c" -exec $2 -style=file -i '{}' \+
 find . -name "*.h" -exec $2 -style=file -i '{}' \+
-
 popd
