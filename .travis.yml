@@ -87,10 +87,10 @@ matrix:
     env:
       - TEST="Doxygen"
     script:
-      - cd ..
-      - doxygen .doxygen.txt
+      - cmake -DBUILD_DOCS=ON ..
+      - make docs
       - |
-        if [[ -s doxygen_warnings.txt ]]; then
+        if [[ -s ../doxygen_warnings.txt ]]; then
           echo "You must fix doxygen before submitting a pull request"
           echo ""
           cat doxygen_warnings.txt

@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2019 Assured Information Security, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -669,9 +669,18 @@ struct xue_work_ring {
     uint64_t phys;
 };
 
+/* @endcond */
+
+/**
+ * Set of system-specific operations required by xue to initialize and
+ * control the DbC. An instance of this structure must be passed to
+ * xue_open. Any field that is NULL will default to the xue_sys_*
+ * implementation defined for the target platform. <em>Any non-NULL field will
+ * simply be called</em>.
+ */
 struct xue_ops {
     /**
-     * init - perform system-specific init operations
+     * Perform system-specific init operations
      *
      * @param sys a pointer to a system-specific data structure
      * @return != 0 iff successful
@@ -679,24 +688,27 @@ struct xue_ops {
     int (*init)(void *sys);
 
     /**
-     * alloc_dma
+     * Allocate pages for read/write DMA
      *
-     * @param order - allocate 2^order pages suitable for read/write DMA
+     * @param sys a pointer to a system-specific data structure
+     * @param order allocate 2^order pages
      * @return a cpu-relative virtual address for accessing the DMA buffer
      */
     void *(*alloc_dma)(void *sys, uint64_t order);
 
     /**
-     * free_dma (must be != NULL if alloc_dma != NULL)
+     * Free pages previously allocated with alloc_dma
      *
+     * @param sys a pointer to a system-specific data structure
      * @param addr the cpu-relative address of the DMA range to free
      * @param order the order of the set of pages to free
      */
     void (*free_dma)(void *sys, void *addr, uint64_t order);
 
     /**
-     * map_xhc - map in the xHC MMIO region as UC memory
+     * Map in the xHC MMIO region as uncacheable memory
      *
+     * @param sys a pointer to a system-specific data structure
      * @param phys the value from the xHC's BAR
      * @param size the number of bytes to map in
      * @return the mapped virtual address
@@ -704,41 +716,49 @@ struct xue_ops {
     void *(*map_xhc)(void *sys, uint64_t phys, uint64_t size);
 
     /**
-     * unmap_xhc
+     * Unmap xHC MMIO region
      *
+     * @param sys a pointer to a system-specific data structure
      * @param virt the MMIO address to unmap
      */
     void (*unmap_xhc)(void *sys, void *virt);
 
     /**
-     * outd - write 32 bits to IO port
+     * Write 32 bits to IO port
      *
+     * @param sys a pointer to a system-specific data structure
      * @param port the port to write to
      * @param data the data to write
      */
     void (*outd)(void *sys, uint32_t port, uint32_t data);
 
     /**
-     * ind - read 32 bits from IO port
+     * Read 32 bits from IO port
      *
+     * @param sys a pointer to a system-specific data structure
      * @param port the port to read from
      * @return the data read from the port
      */
     uint32_t (*ind)(void *sys, uint32_t port);
 
     /**
-     * virt_to_dma - translate a virtual address to a DMA address
+     * Translate a virtual address to a DMA address
      *
+     * @param sys a pointer to a system-specific data structure
      * @param virt the address returned from a previous alloc_dma call
      * @return the resulting bus-relative DMA address
      */
     uint64_t (*virt_to_dma)(void *sys, const void *virt);
 
     /**
-     * sfence - write memory barrier
+     * Perform a write memory barrier
+     *
+     * @param sys a pointer to a system-specific data structure
      */
     void (*sfence)(void *sys);
 };
+
+/* @cond */
 
 struct xue {
     void *sys;

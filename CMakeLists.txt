@@ -22,13 +22,13 @@
 cmake_minimum_required(VERSION 3.10)
 project(xue)
 
-option(BUILD_TESTS "Build unit tests")
+option(BUILD_DOCS "Build documentation")
+option(BUILD_TESTS "Build static analysis and unit tests")
 
 set(XUE_INCLUDE ${PROJECT_SOURCE_DIR}/include)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_CLANG_TIDY clang-tidy -header-filter=${XUE_INCLUDE}
-    -checks=-*,bugprone-*,cert-*-c,misc-*,perf*
-)
+    -checks=-*,bugprone-*,cert-*-c,misc-*,perf*)
 
 add_library(xue INTERFACE)
 target_include_directories(xue INTERFACE ${XUE_INCLUDE})
@@ -38,8 +38,7 @@ find_program(FORMAT NAMES clang-format REQUIRED)
 add_custom_target(format COMMAND
     ${PROJECT_SOURCE_DIR}/scripts/format.sh
     ${PROJECT_SOURCE_DIR}
-    ${FORMAT}
-)
+    ${FORMAT})
 
 if(BUILD_TESTS)
     enable_testing()
@@ -60,4 +59,10 @@ if(BUILD_TESTS)
     target_include_directories(test_xue PRIVATE ${XUE_INCLUDE})
 
     add_test(NAME test_xue COMMAND test_xue)
+endif()
+
+if(BUILD_DOCS)
+    find_program(DOXYGEN NAMES doxygen REQUIRED)
+    add_custom_target(docs COMMAND
+        ${CMAKE_COMMAND} -E chdir ${PROJECT_SOURCE_DIR} ${DOXYGEN} .doxygen.txt)
 endif()
