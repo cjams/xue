@@ -1344,8 +1344,13 @@ static inline void xue_dump(struct xue *xue)
     xue_debug("    ctrl: 0x%x stat: 0x%x psc: 0x%x\n", r->ctrl, r->st,
               r->portsc);
     xue_debug("    id: 0x%x, db: 0x%x\n", r->id, r->db);
+#ifdef __XEN__
     xue_debug("    erstsz: %u, erstba: 0x%lx\n", r->erstsz, r->erstba);
     xue_debug("    erdp: 0x%lx, cp: 0x%lx\n", r->erdp, r->cp);
+#else
+    xue_debug("    erstsz: %u, erstba: 0x%llx\n", r->erstsz, r->erstba);
+    xue_debug("    erdp: 0x%llx, cp: 0x%llx\n", r->erdp, r->cp);
+#endif
     xue_debug("    ddi1: 0x%x, ddi2: 0x%x\n", r->ddi1, r->ddi2);
     xue_debug("    erstba == virt_to_dma(erst): %d\n",
               r->erstba == op->virt_to_dma(xue->sys, xue->dbc_erst));
