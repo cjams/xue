@@ -1,6 +1,6 @@
-# Xue USB 3.0 Debugger
+# Xue USB 3 Debugger
 
-Xue is a cross-platform driver for the USB 3.0 Debug Capability (DbC). It is a
+Xue is a cross-platform driver for the USB 3 Debug Capability (DbC). It is a
 header-only library so that it may be easily included into various
 environments. The goal of Xue is to provide a high-bandwidth debugger that can
 be used with two standard mobile/laptop devices without the need for legacy
@@ -9,7 +9,7 @@ UART hardware.
 ### Hardware Requirements
 
 To use xue, you need two machines: a target and a host. The target (the one
-you're debugging) must have a USB 3.0 xHCI host controller that
+you're debugging) must have a USB 3 xHCI host controller that
 implements the Debug Capability as described in the xHCI
 [specification](https://www.intel.com/content/dam/www/public/us/en/documents/technical-specifications/extensible-host-controler-interface-usb-xhci.pdf).
 So far the following Intel (PCI vendor 0x8086) host controllers have been
@@ -113,7 +113,7 @@ output from the debug target.
     code resets the host controller, the DbC is reset as well. Unfortunately
     Linux does this on every boot. One workaround is to pass 'usbcore.nousb'
     on the kernel commandline prior to booting. Providing this parameter means
-    you will have no USB at all, but depending on your debugging scenario this
+    you will have no USB at all, but depending on your ~desperation~ debugging scenario this
     may be acceptable, e.g., you can ssh into the target machine after boot.
 
   - The DbC is subject to DMA remapping. If the USB host controller is being
