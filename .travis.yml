@@ -187,7 +187,7 @@ matrix:
       - make dist-xen -j3
 
   #
-  # Xen driver
+  # UEFI application
   #
   - os: linux
     env:
@@ -204,3 +204,27 @@ matrix:
       - sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-8 100
       - cd ../test
       - make
+
+  #
+  # Bareflank
+  #
+  - os: linux
+    addons:
+      apt:
+        sources:
+          - ubuntu-toolchain-r-test
+          - llvm-toolchain-trusty-8
+        packages:
+          - gcc-8
+          - g++-8
+          - clang-8
+          - nasm
+    env:
+      - TEST="Bareflank"
+    script:
+      - export CLANG_BIN=/usr/bin/clang-8
+      - git clone https://github.com/connojd/hypervisor.git -b xue
+      - mkdir bfbuild
+      - cd bfbuild
+      - cmake -DCONFIG=travis_static -DCACHE_DIR=../../../cache -DXUE_DIR=../../ ../hypervisor
+      - make -j3
