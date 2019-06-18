@@ -19,31 +19,25 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <stdint.h>
-#include <stdio.h>
-#include <string.h>
-#include <xue/xue.h>
+#include <efi.h>
+#include <efilib.h>
+#include <xue.h>
 
-void _vmcall(uint64_t rax, uint64_t rbx, uint64_t rcx, uint64_t rdx);
+struct xue xue;
+struct xue_ops ops;
+struct xue_efi sys;
 
-static inline void test(uint64_t rax) { _vmcall(rax, 0, 0, 0); }
-
-int main(int argc, char **argv)
+EFI_STATUS EFIAPI efi_main(EFI_HANDLE img, EFI_SYSTEM_TABLE *systab)
 {
-    if (argc != 2) {
-        printf("ERROR: xud expects 1 arg\n");
-        return 22;
+    InitializeLib(img, systab);
+
+    ZeroMem((VOID *)&xue, sizeof(xue));
+    ZeroMem((VOID *)&ops, sizeof(ops));
+    ZeroMem((VOID *)&sys, sizeof(sys));
+
+    if (!xue_open(&xue, &ops, &sys)) {
+        return EFI_DEVICE_ERROR;
     }
 
-    if (!strcmp("init", argv[1])) {
-        test(XUE_INIT);
-    } else if (!strcmp("disable", argv[1])) {
-        test(XUE_DISABLE);
-    } else if (!strcmp("dump", argv[1])) {
-        test(XUE_DUMP);
-    } else if (!strcmp("write", argv[1])) {
-        test(XUE_WRITE);
-    } else if (!strcmp("ack", argv[1])) {
-        test(XUE_ACK);
-    }
+    return EFI_SUCCESS;
 }

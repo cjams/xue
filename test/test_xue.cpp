@@ -365,8 +365,8 @@ TEST_CASE("xue_trb_ring_init")
     prod_ring.trb = xue.dbc_oring.trb;
     cons_ring.trb = xue.dbc_ering.trb;
 
-    xue_trb_ring_init(&xue, &prod_ring, 1);
-    xue_trb_ring_init(&xue, &cons_ring, 0);
+    xue_trb_ring_init(&xue, &prod_ring, 1, XUE_DB_OUT);
+    xue_trb_ring_init(&xue, &cons_ring, 0, XUE_DB_INVAL);
 
     CHECK(!xue_trb_ring_full(&prod_ring));
     CHECK(!xue_trb_ring_full(&cons_ring));
@@ -374,10 +374,12 @@ TEST_CASE("xue_trb_ring_init")
     CHECK(prod_ring.enq == 0);
     CHECK(prod_ring.deq == 0);
     CHECK(prod_ring.cyc == 1);
+    CHECK(prod_ring.db == XUE_DB_OUT);
 
     CHECK(cons_ring.enq == 0);
     CHECK(cons_ring.deq == 0);
     CHECK(cons_ring.cyc == 1);
+    CHECK(cons_ring.db == XUE_DB_INVAL);
 
     struct xue_trb *prod_end = &prod_ring.trb[XUE_TRB_RING_CAP - 1];
     CHECK(xue_trb_type(prod_end) == xue_trb_link);
@@ -398,7 +400,7 @@ TEST_CASE("xue_push_trb")
     xue_alloc_dma(&xue);
 
     ring.trb = xue.dbc_oring.trb;
-    xue_trb_ring_init(&xue, &ring, 1);
+    xue_trb_ring_init(&xue, &ring, 1, XUE_DB_OUT);
 
     CHECK(ring.enq == 0);
     CHECK(ring.cyc == 1);
@@ -467,8 +469,8 @@ TEST_CASE("xue_pop_events")
     evt = &xue.dbc_ering;
     out = &xue.dbc_oring;
 
-    xue_trb_ring_init(&xue, evt, 0);
-    xue_trb_ring_init(&xue, out, 1);
+    xue_trb_ring_init(&xue, evt, 0, XUE_DB_INVAL);
+    xue_trb_ring_init(&xue, out, 1, XUE_DB_OUT);
 
     struct xue_trb tfre{};
     struct xue_trb psce{};

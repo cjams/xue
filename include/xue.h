@@ -23,6 +23,8 @@
 #ifndef XUE_H
 #define XUE_H
 
+/* @cond */
+
 #define XUE_PAGE_SIZE 4096ULL
 
 /* Supported xHC PCI configurations */
@@ -643,7 +645,12 @@ struct xue_trb_ring {
     uint32_t enq; /* The offset of the enqueue ptr */
     uint32_t deq; /* The offset of the dequeue ptr */
     uint8_t cyc; /* Cycle state toggled on each wrap-around */
+    uint8_t db; /* Doorbell target */
 };
+
+#define XUE_DB_OUT 0x0
+#define XUE_DB_IN 0x1
+#define XUE_DB_INVAL 0xFF
 
 /* Defines the size in bytes of work rings as 2^XUE_WORK_RING_ORDER * 4096 */
 #ifndef XUE_WORK_RING_ORDER
@@ -967,13 +974,15 @@ static inline void xue_trb_link_set_tc(struct xue_trb *trb)
 }
 
 static inline void xue_trb_ring_init(const struct xue *xue,
-                                     struct xue_trb_ring *ring, int producer)
+                                     struct xue_trb_ring *ring, int producer,
+                                     int doorbell)
 {
     xue_mset(ring->trb, 0, XUE_TRB_RING_CAP * sizeof(ring->trb[0]));
 
     ring->enq = 0;
     ring->deq = 0;
     ring->cyc = 1;
+    ring->db = doorbell;
 
     /*
      * Producer implies transfer ring, so we have to place a
@@ -1086,6 +1095,8 @@ static inline void xue_enable_dbc(struct xue *xue)
 {
     xue->ops->sfence(xue->sys);
     xue->dbc_reg->ctrl |= (1UL << XUE_CTRL_DCE);
+    xue->ops->sfence(xue->sys);
+    xue->dbc_reg->portsc |= (1UL << XUE_PSC_PED);
 }
 
 static inline void xue_set_ep_type(uint32_t *ep, uint32_t type)
@@ -1169,9 +1180,9 @@ static inline int xue_init_dbc(struct xue *xue)
     xue->dbc_reg = reg;
     xue_reset_dbc(xue);
 
-    xue_trb_ring_init(xue, &xue->dbc_ering, 0);
-    xue_trb_ring_init(xue, &xue->dbc_oring, 1);
-    xue_trb_ring_init(xue, &xue->dbc_iring, 1);
+    xue_trb_ring_init(xue, &xue->dbc_ering, 0, XUE_DB_INVAL);
+    xue_trb_ring_init(xue, &xue->dbc_oring, 1, XUE_DB_OUT);
+    xue_trb_ring_init(xue, &xue->dbc_iring, 1, XUE_DB_IN);
 
     erdp = op->virt_to_dma(xue->sys, xue->dbc_ering.trb);
     if (!erdp) {
@@ -1304,6 +1315,26 @@ static inline int xue_alloc_dbc(struct xue *xue)
 
 static inline void xue_free_dbc(struct xue *xue) { xue_free_dma(xue); }
 
+static inline void xue_dump(struct xue *xue)
+{
+    struct xue_ops *op = xue->ops;
+    struct xue_dbc_reg *r = xue->dbc_reg;
+
+    xue_debug("XUE DUMP:\n");
+    xue_debug("    ctrl: 0x%x stat: 0x%x psc: 0x%x\n", r->ctrl, r->st,
+              r->portsc);
+    xue_debug("    id: 0x%x, db: 0x%x\n", r->id, r->db);
+    xue_debug("    erstsz: %u, erstba: 0x%lx\n", r->erstsz, r->erstba);
+    xue_debug("    erdp: 0x%lx, cp: 0x%lx\n", r->erdp, r->cp);
+    xue_debug("    ddi1: 0x%x, ddi2: 0x%x\n", r->ddi1, r->ddi2);
+    xue_debug("    erstba == virt_to_dma(erst): %d\n",
+              r->erstba == op->virt_to_dma(xue->sys, xue->dbc_erst));
+    xue_debug("    erdp == virt_to_dma(erst[0].base): %d\n",
+              r->erdp == xue->dbc_erst[0].base);
+    xue_debug("    cp == virt_to_dma(ctx): %d\n",
+              r->cp == op->virt_to_dma(xue->sys, xue->dbc_ctx));
+}
+
 #define xue_set_op(op)                                                         \
     do {                                                                       \
         if (!ops->op) {                                                        \
@@ -1326,7 +1357,20 @@ static inline void xue_init_ops(struct xue *xue, struct xue_ops *ops)
     xue->ops = ops;
 }
 
-static inline int xue_open(struct xue *xue, struct xue_ops *ops, void *sys)
+/* @endcond */
+
+/**
+ * Initialize the DbC and enable it for transfers. First map in the DbC
+ * registers from the host controller's MMIO region. Then allocate and map
+ * DMA for the event and transfer rings. Finally, enable the DbC for
+ * the host to enumerate. On success, the DbC is ready to send packets.
+ *
+ * @param xue the xue to open (!= NULL)
+ * @param ops the xue ops to use (!= NULL)
+ * @param sys the system-specific data (may be NULL)
+ * @return 1 iff xue_open succeeded
+ */
+static inline int64_t xue_open(struct xue *xue, struct xue_ops *ops, void *sys)
 {
     if (!xue || !ops) {
         return 0;
@@ -1361,10 +1405,20 @@ static inline int xue_open(struct xue *xue, struct xue_ops *ops, void *sys)
     return 1;
 }
 
+/**
+ * Commit the pending transfer TRBs to the DbC. This notifies
+ * the DbC of any previously-queued data on the work ring and
+ * rings the doorbell.
+ *
+ * @param xue the xue to flush
+ * @param trb the ring containing the TRBs to transfer
+ * @param wrk the work ring containing data to be flushed
+ */
 static inline void xue_flush(struct xue *xue, struct xue_trb_ring *trb,
                              struct xue_work_ring *wrk)
 {
     struct xue_dbc_reg *reg = xue->dbc_reg;
+    uint32_t db = (reg->db & 0xFFFF00FF) | (trb->db << 8);
     xue_pop_events(xue);
 
     if (!(reg->ctrl & (1UL << XUE_CTRL_DCR))) {
@@ -1396,9 +1450,19 @@ static inline void xue_flush(struct xue *xue, struct xue_trb_ring *trb,
     }
 
     xue->ops->sfence(xue->sys);
-    xue->dbc_reg->db &= 0xFFFF00FF;
+    reg->db = db;
 }
 
+/**
+ * Queue the data referenced by the given buffer to the DbC. A transfer TRB
+ * will be created and the DbC will be notified that data is available for
+ * writing to the debug host.
+ *
+ * @param xue the xue to write to
+ * @param buf the data to write
+ * @param size the length in bytes of buf
+ * @return the number of bytes written
+ */
 static inline int64_t xue_write(struct xue *xue, const char *buf, uint64_t size)
 {
     int64_t ret;
@@ -1416,6 +1480,15 @@ static inline int64_t xue_write(struct xue *xue, const char *buf, uint64_t size)
     return ret;
 }
 
+/**
+ * Queue a single character to the DbC. A transfer TRB will be created
+ * if the character is a newline and the DbC will be notified that data is
+ * available for writing to the debug host.
+ *
+ * @param xue the xue to write to
+ * @param c the character to write
+ * @return the number of bytes written
+ */
 static inline int64_t xue_putc(struct xue *xue, char c)
 {
     if (!xue_push_work(&xue->dbc_owork, &c, 1)) {
@@ -1429,26 +1502,11 @@ static inline int64_t xue_putc(struct xue *xue, char c)
     return 1;
 }
 
-static inline void xue_dump(struct xue *xue)
-{
-    struct xue_ops *op = xue->ops;
-    struct xue_dbc_reg *r = xue->dbc_reg;
-
-    xue_debug("XUE DUMP:\n");
-    xue_debug("    ctrl: 0x%x stat: 0x%x psc: 0x%x\n", r->ctrl, r->st,
-              r->portsc);
-    xue_debug("    id: 0x%x, db: 0x%x\n", r->id, r->db);
-    xue_debug("    erstsz: %u, erstba: 0x%lx\n", r->erstsz, r->erstba);
-    xue_debug("    erdp: 0x%lx, cp: 0x%lx\n", r->erdp, r->cp);
-    xue_debug("    ddi1: 0x%x, ddi2: 0x%x\n", r->ddi1, r->ddi2);
-    xue_debug("    erstba == virt_to_dma(erst): %d\n",
-              r->erstba == op->virt_to_dma(xue->sys, xue->dbc_erst));
-    xue_debug("    erdp == virt_to_dma(erst[0].base): %d\n",
-              r->erdp == xue->dbc_erst[0].base);
-    xue_debug("    cp == virt_to_dma(ctx): %d\n",
-              r->cp == op->virt_to_dma(xue->sys, xue->dbc_ctx));
-}
-
+/**
+ * Disable the DbC and free DMA and MMIO resources back to the host system.
+ *
+ * @param xue the xue close
+ */
 static inline void xue_close(struct xue *xue)
 {
     xue_reset_dbc(xue);
