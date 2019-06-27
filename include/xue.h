@@ -114,6 +114,7 @@ static inline uint64_t xue_sys_virt_to_dma(void *, const void *virt)
 #include <memory_manager/arch/x64/cr3.h>
 #include <memory_manager/memory_manager.h>
 #include <cstdio>
+#include <cstdlib>
 #include <debug/serial/serial_ns16550a.h>
 
 static_assert(XUE_PAGE_SIZE == BAREFLANK_PAGE_SIZE);
@@ -151,7 +152,7 @@ static inline uint64_t xue_sys_virt_to_dma(void *sys, const void *virt)
 static inline void *xue_sys_alloc_dma(void *sys, uint64_t order)
 {
     (void)sys;
-    return g_mm->alloc(XUE_PAGE_SIZE << order);
+    return calloc(XUE_PAGE_SIZE << order, 1);
 }
 
 static inline void xue_sys_free_dma(void *sys, void *addr, uint64_t order)
@@ -159,7 +160,7 @@ static inline void xue_sys_free_dma(void *sys, void *addr, uint64_t order)
     (void)sys;
     (void)order;
 
-    g_mm->free(addr);
+    free(addr);
 }
 
 static inline void *xue_sys_map_xhc(void *sys, uint64_t phys, uint64_t count)
@@ -176,7 +177,7 @@ static inline void *xue_sys_map_xhc(void *sys, uint64_t phys, uint64_t count)
                       mem_t::uncacheable);
     }
 
-    return NULL;
+    return virt;
 }
 
 static inline void xue_sys_unmap_xhc(void *sys, void *virt, uint64_t count)
@@ -185,6 +186,7 @@ static inline void xue_sys_unmap_xhc(void *sys, void *virt, uint64_t count)
 
     for (uint64_t i = 0U; i < count; i += XUE_PAGE_SIZE) {
         g_cr3->unmap((uint64_t)virt + i);
+        g_cr3->release((uint64_t)virt + i);
     }
 
     g_mm->free_map(virt);
@@ -804,6 +806,7 @@ struct xue_ops {
 
 struct xue {
     int sysid;
+    int ready;
     void *sys;
     struct xue_ops *ops;
 
@@ -1121,11 +1124,11 @@ static inline int64_t xue_push_work(struct xue_work_ring *ring, const char *buf,
  */
 static inline void xue_pop_events(struct xue *xue)
 {
-    const int trb_shift = 4;
     struct xue_trb_ring *er = &xue->dbc_ering;
     struct xue_trb_ring *tr = &xue->dbc_oring;
     struct xue_trb *event = &er->trb[er->deq];
     uint64_t erdp = xue->dbc_reg->erdp;
+    const int trb_shift = 4;
 
     while (xue_trb_cyc(event) == er->cyc) {
         switch (xue_trb_type(event)) {
@@ -1162,6 +1165,11 @@ static inline void xue_enable_dbc(struct xue *xue)
     xue->dbc_reg->portsc |= (1UL << XUE_PSC_PED);
 }
 
+static inline int xue_dbc_is_disabled(struct xue *xue)
+{
+    return (xue->dbc_reg->ctrl & (1UL << XUE_CTRL_DCE)) == 0;
+}
+
 /**
  * xue_init_ep
  *
@@ -1186,7 +1194,7 @@ static inline void xue_init_ep(uint32_t *ep, uint64_t mbs, uint32_t type,
     ep[4] = 3 * 1024;
 }
 
-/* Initialize the DbC info with USB string descriptor addresses */
+/* Initialize the DbC info with USB string descriptor addresses (sda) */
 static inline void xue_init_strings(struct xue *xue, uint32_t *info)
 {
     uint64_t *sda;
@@ -1268,25 +1276,6 @@ static inline int xue_init_dbc(struct xue *xue)
     return 1;
 }
 
-static inline void xue_free_dma(struct xue *xue)
-{
-    struct xue_ops *ops = xue->ops;
-
-    if (!ops->free_dma) {
-        return;
-    }
-
-    ops->free_dma(xue->sys, xue->dbc_str, 0);
-    ops->free_dma(xue->sys, xue->dbc_owork.buf, XUE_WORK_RING_ORDER);
-    ops->free_dma(xue->sys, xue->dbc_iring.trb, XUE_TRB_RING_ORDER);
-    ops->free_dma(xue->sys, xue->dbc_oring.trb, XUE_TRB_RING_ORDER);
-    ops->free_dma(xue->sys, xue->dbc_ering.trb, XUE_TRB_RING_ORDER);
-    ops->free_dma(xue->sys, xue->dbc_erst, 0);
-    ops->free_dma(xue->sys, xue->dbc_ctx, 0);
-
-    xue->dma_allocated = 0;
-}
-
 static inline int xue_alloc_dma(struct xue *xue)
 {
     void *sys = xue->sys;
@@ -1359,7 +1348,7 @@ free_ctx:
     return 0;
 }
 
-static inline int xue_alloc_dbc(struct xue *xue)
+static inline int xue_alloc(struct xue *xue)
 {
     if (!xue_alloc_dma(xue)) {
         xue_error("xue_alloc_dma failed\n");
@@ -1368,8 +1357,6 @@ static inline int xue_alloc_dbc(struct xue *xue)
 
     return 1;
 }
-
-static inline void xue_free_dbc(struct xue *xue) { xue_free_dma(xue); }
 
 static inline void xue_dump(struct xue *xue)
 {
@@ -1418,6 +1405,35 @@ static inline void xue_init_ops(struct xue *xue, struct xue_ops *ops)
     xue->ops = ops;
 }
 
+static inline void xue_init_work_ring(struct xue *xue,
+                                      struct xue_work_ring *wrk)
+{
+    wrk->enq = 0;
+    wrk->deq = 0;
+    wrk->phys = xue->ops->virt_to_dma(xue->sys, wrk->buf);
+}
+
+static inline void xue_free(struct xue *xue)
+{
+    void *sys = xue->sys;
+    struct xue_ops *ops = xue->ops;
+
+    if (!ops->free_dma) {
+        return;
+    }
+
+    ops->free_dma(sys, xue->dbc_str, 0);
+    ops->free_dma(sys, xue->dbc_owork.buf, XUE_WORK_RING_ORDER);
+    ops->free_dma(sys, xue->dbc_iring.trb, XUE_TRB_RING_ORDER);
+    ops->free_dma(sys, xue->dbc_oring.trb, XUE_TRB_RING_ORDER);
+    ops->free_dma(sys, xue->dbc_ering.trb, XUE_TRB_RING_ORDER);
+    ops->free_dma(sys, xue->dbc_erst, 0);
+    ops->free_dma(sys, xue->dbc_ctx, 0);
+    ops->unmap_xhc(sys, xue->xhc_mmio, xue->xhc_mmio_size);
+
+    xue->dma_allocated = 0;
+}
+
 /* @endcond */
 
 /**
@@ -1448,21 +1464,19 @@ static inline int64_t xue_open(struct xue *xue, struct xue_ops *ops, void *sys)
         return 0;
     }
 
-    if (!xue_alloc_dbc(xue)) {
+    if (!xue_alloc(xue)) {
         return 0;
     }
 
     if (!xue_init_dbc(xue)) {
-        xue_free_dbc(xue);
-        ops->unmap_xhc(sys, xue->xhc_mmio, xue->xhc_mmio_size);
+        xue_free(xue);
         return 0;
     }
 
-    xue->dbc_owork.enq = 0;
-    xue->dbc_owork.deq = 0;
-    xue->dbc_owork.phys = ops->virt_to_dma(sys, xue->dbc_owork.buf);
-
+    xue_init_work_ring(xue, &xue->dbc_owork);
     xue_enable_dbc(xue);
+    xue->ready = 1;
+
     return 1;
 }
 
@@ -1480,6 +1494,17 @@ static inline void xue_flush(struct xue *xue, struct xue_trb_ring *trb,
 {
     struct xue_dbc_reg *reg = xue->dbc_reg;
     uint32_t db = (reg->db & 0xFFFF00FF) | (trb->db << 8);
+
+    if (xue->ready && xue_dbc_is_disabled(xue)) {
+        if (!xue_init_dbc(xue)) {
+            xue_free(xue);
+            return;
+        }
+
+        xue_init_work_ring(xue, &xue->dbc_owork);
+        xue_enable_dbc(xue);
+    }
+
     xue_pop_events(xue);
 
     if (!(reg->ctrl & (1UL << XUE_CTRL_DCR))) {
@@ -1565,14 +1590,13 @@ static inline int64_t xue_putc(struct xue *xue, char c)
 
 /**
  * Disable the DbC and free DMA and MMIO resources back to the host system.
- *
- * @param xue the xue close
+ * @param xue the xue to close
  */
 static inline void xue_close(struct xue *xue)
 {
     xue_reset_dbc(xue);
-    xue_free_dbc(xue);
-    xue->ops->unmap_xhc(xue->sys, xue->xhc_mmio, xue->xhc_mmio_size);
+    xue_free(xue);
+    xue->ready = 0;
 }
 
 #ifdef __cplusplus
