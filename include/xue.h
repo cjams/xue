@@ -71,6 +71,15 @@ static inline int known_xhc(uint32_t dev_ven)
     }
 }
 
+/* Xue system id */
+enum {
+    xue_sysid_linux,
+    xue_sysid_windows,
+    xue_sysid_efi,
+    xue_sysid_xen,
+    xue_sysid_test
+};
+
 /* Userspace testing */
 #if defined(XUE_TEST)
 #include <cstdint>
@@ -79,12 +88,13 @@ static inline int known_xhc(uint32_t dev_ven)
 #define xue_debug(...) printf("xue debug: " __VA_ARGS__)
 #define xue_alert(...) printf("xue alert: " __VA_ARGS__)
 #define xue_error(...) printf("xue error: " __VA_ARGS__)
+#define XUE_SYSID xue_sysid_test
 
 extern "C" {
 static inline int xue_sys_init(void *) { return 1; }
 static inline void xue_sys_sfence(void *) {}
 static inline void *xue_sys_map_xhc(void *, uint64_t, uint64_t) { return NULL; }
-static inline void xue_sys_unmap_xhc(void *sys, void *) {}
+static inline void xue_sys_unmap_xhc(void *sys, void *, uint64_t) {}
 static inline void *xue_sys_alloc_dma(void *, uint64_t) { return NULL; }
 static inline void xue_sys_free_dma(void *sys, void *, uint64_t) {}
 static inline void xue_sys_outd(void *sys, uint32_t, uint32_t) {}
@@ -100,9 +110,13 @@ static inline uint64_t xue_sys_virt_to_dma(void *, const void *virt)
 /* Bareflank VMM */
 #if defined(VMM)
 #include <arch/intel_x64/barrier.h>
+#include <arch/x64/portio.h>
+#include <memory_manager/arch/x64/cr3.h>
+#include <memory_manager/memory_manager.h>
 #include <cstdio>
 #include <debug/serial/serial_ns16550a.h>
-#include <debug/serial/serial_pl011.h>
+
+static_assert(XUE_PAGE_SIZE == BAREFLANK_PAGE_SIZE);
 
 #define xue_printf(...)                                                        \
     do {                                                                       \
@@ -130,41 +144,63 @@ static inline void xue_sys_sfence(void *) { _wmb(); }
 
 static inline uint64_t xue_sys_virt_to_dma(void *sys, const void *virt)
 {
-    xue_error("%s should not be called from the VMM\n", __func__);
-    return 0;
+    (void)sys;
+    return g_mm->virtptr_to_physint((void *)virt);
 }
 
 static inline void *xue_sys_alloc_dma(void *sys, uint64_t order)
 {
-    xue_error("%s should not be called from the VMM\n", __func__);
-    return NULL;
+    (void)sys;
+    return calloc(XUE_PAGE_SIZE << order, 1);
 }
 
 static inline void xue_sys_free_dma(void *sys, void *addr, uint64_t order)
 {
-    xue_error("%s should not be called from the VMM\n", __func__);
+    (void)sys;
+    (void)order;
+
+    free(addr);
 }
 
 static inline void *xue_sys_map_xhc(void *sys, uint64_t phys, uint64_t count)
 {
-    xue_error("%s should not be called from the VMM\n", __func__);
-    return NULL;
+    (void)sys;
+
+    void *virt = g_mm->alloc_map(count);
+
+    for (uint64_t i = 0U; i < count; i += XUE_PAGE_SIZE) {
+        using attr_t = bfvmm::x64::cr3::mmap::attr_type;
+        using mem_t = bfvmm::x64::cr3::mmap::memory_type;
+
+        g_cr3->map_4k((uint64_t)virt + i, phys + i, attr_t::read_write,
+                      mem_t::uncacheable);
+    }
+
+    return virt;
 }
 
-static inline void xue_sys_unmap_xhc(void *sys, void *virt)
+static inline void xue_sys_unmap_xhc(void *sys, void *virt, uint64_t count)
 {
-    xue_error("%s should not be called from the VMM\n", __func__);
+    (void)sys;
+
+    for (uint64_t i = 0U; i < count; i += XUE_PAGE_SIZE) {
+        g_cr3->unmap((uint64_t)virt + i);
+        g_cr3->release((uint64_t)virt + i);
+    }
+
+    g_mm->free_map(virt);
 }
 
 static inline void xue_sys_outd(void *sys, uint32_t port, uint32_t data)
 {
-    xue_error("%s should not be called from the VMM\n", __func__);
+    (void)sys;
+    _outd(port, data);
 }
 
 static inline uint32_t xue_sys_ind(void *sys, uint32_t port)
 {
-    xue_error("%s should not be called from the VMM\n", __func__);
-    return 0;
+    (void)sys;
+    return _ind(port);
 }
 
 #ifdef __cplusplus
@@ -186,6 +222,7 @@ extern "C" {
 #define xue_debug(...) printk(KERN_DEBUG "xue debug: " __VA_ARGS__)
 #define xue_alert(...) printk(KERN_ALERT "xue alert: " __VA_ARGS__)
 #define xue_error(...) printk(KERN_ERR "xue error: " __VA_ARGS__)
+#define XUE_SYSID xue_sysid_linux
 
 static inline int xue_sys_init(void *sys) { return 1; }
 static inline void xue_sys_sfence(void *sys) { wmb(); }
@@ -205,8 +242,9 @@ static inline void *xue_sys_map_xhc(void *sys, uint64_t phys, uint64_t count)
     return ioremap(phys, (long unsigned int)count);
 }
 
-static inline void xue_sys_unmap_xhc(void *sys, void *virt)
+static inline void xue_sys_unmap_xhc(void *sys, void *virt, uint64_t count)
 {
+    (void)count;
     iounmap((volatile void *)virt);
 }
 
@@ -241,6 +279,8 @@ typedef UINT64 uint64_t;
 typedef UINT_PTR uintptr_t;
 typedef INT_PTR intptr_t;
 
+#define XUE_SYSID xue_sysid_windows
+
 #define xue_debug(...)                                                         \
     DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,                         \
                "xue debug: " __VA_ARGS__)
@@ -259,6 +299,7 @@ typedef INT_PTR intptr_t;
 #define xue_debug(...) Print(L"xue debug: " __VA_ARGS__)
 #define xue_alert(...) Print(L"xue alert: " __VA_ARGS__)
 #define xue_error(...) Print(L"xue error: " __VA_ARGS__)
+#define XUE_SYSID xue_sysid_efi
 
 /* NOTE: see xue_alloc_dma for the number of buffers created by alloc_dma */
 #define XUE_DMA_DESC_CAP 7
@@ -480,10 +521,11 @@ static inline void *xue_sys_map_xhc(void *sys, uint64_t phys, uint64_t count)
     return (void *)phys;
 }
 
-static inline void xue_sys_unmap_xhc(void *sys, void *virt)
+static inline void xue_sys_unmap_xhc(void *sys, void *virt, uint64_t count)
 {
     (void)sys;
     (void)virt;
+    (void)count;
 }
 
 static inline void xue_sys_sfence(void *sys)
@@ -493,7 +535,7 @@ static inline void xue_sys_sfence(void *sys)
 }
 #endif
 
-#if defined(__XEN__)
+#if defined(__XEN__) && !defined(VMM)
 
 #include <asm/fixmap.h>
 #include <asm/io.h>
@@ -503,10 +545,11 @@ static inline void xue_sys_sfence(void *sys)
 #define xue_debug(...) printk("xue debug: " __VA_ARGS__)
 #define xue_alert(...) printk("xue alert: " __VA_ARGS__)
 #define xue_error(...) printk("xue error: " __VA_ARGS__)
+#define XUE_SYSID xue_sysid_xen
 
 static inline int xue_sys_init(void *sys) { return 1; }
 static inline void xue_sys_sfence(void *sys) { wmb(); }
-static inline void xue_sys_unmap_xhc(void *sys, void *virt) {}
+static inline void xue_sys_unmap_xhc(void *sys, void *virt, uint64_t count) {}
 static inline void xue_sys_free_dma(void *sys, void *addr, uint64_t order) {}
 
 static inline void *xue_sys_alloc_dma(void *sys, uint64_t order)
@@ -721,7 +764,7 @@ struct xue_ops {
      * @param sys a pointer to a system-specific data structure
      * @param virt the MMIO address to unmap
      */
-    void (*unmap_xhc)(void *sys, void *virt);
+    void (*unmap_xhc)(void *sys, void *virt, uint64_t size);
 
     /**
      * Write 32 bits to IO port
@@ -761,6 +804,7 @@ struct xue_ops {
 /* @cond */
 
 struct xue {
+    int sysid;
     void *sys;
     struct xue_ops *ops;
 
@@ -1119,12 +1163,6 @@ static inline void xue_enable_dbc(struct xue *xue)
     xue->dbc_reg->portsc |= (1UL << XUE_PSC_PED);
 }
 
-static inline void xue_set_ep_type(uint32_t *ep, uint32_t type)
-{
-    ep[1] &= ~0x38UL;
-    ep[1] |= (type << 3);
-}
-
 /**
  * xue_init_ep
  *
@@ -1142,9 +1180,8 @@ static inline void xue_init_ep(uint32_t *ep, uint64_t mbs, uint32_t type,
                                uint64_t ring_dma)
 {
     xue_mset(ep, 0, XUE_CTX_BYTES);
-    xue_set_ep_type(ep, type);
 
-    ep[1] |= (1024 << 16) | ((uint32_t)mbs << 8);
+    ep[1] = (1024 << 16) | ((uint32_t)mbs << 8) | (type << 3);
     ep[2] = (ring_dma & 0xFFFFFFFF) | 1;
     ep[3] = ring_dma >> 32;
     ep[4] = 3 * 1024;
@@ -1344,7 +1381,7 @@ static inline void xue_dump(struct xue *xue)
     xue_debug("    ctrl: 0x%x stat: 0x%x psc: 0x%x\n", r->ctrl, r->st,
               r->portsc);
     xue_debug("    id: 0x%x, db: 0x%x\n", r->id, r->db);
-#ifdef __XEN__
+#if defined(__XEN__) || defined(VMM)
     xue_debug("    erstsz: %u, erstba: 0x%lx\n", r->erstsz, r->erstba);
     xue_debug("    erdp: 0x%lx, cp: 0x%lx\n", r->erdp, r->cp);
 #else
@@ -1418,7 +1455,7 @@ static inline int64_t xue_open(struct xue *xue, struct xue_ops *ops, void *sys)
 
     if (!xue_init_dbc(xue)) {
         xue_free_dbc(xue);
-        ops->unmap_xhc(sys, xue->xhc_mmio);
+        ops->unmap_xhc(sys, xue->xhc_mmio, xue->xhc_mmio_size);
         return 0;
     }
 
@@ -1536,7 +1573,7 @@ static inline void xue_close(struct xue *xue)
 {
     xue_reset_dbc(xue);
     xue_free_dbc(xue);
-    xue->ops->unmap_xhc(xue->sys, xue->xhc_mmio);
+    xue->ops->unmap_xhc(xue->sys, xue->xhc_mmio, xue->xhc_mmio_size);
 }
 
 #ifdef __cplusplus
