@@ -289,6 +289,85 @@ typedef INT_PTR intptr_t;
 #define xue_error(...)                                                         \
     DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL,                        \
                "xue error: " __VA_ARGS__)
+
+static inline int xue_sys_init(void *sys)
+{
+    (void)sys;
+
+    xue_error("Xue cannot be used from windows drivers");
+    return 0;
+}
+
+static inline void xue_sys_sfence(void *sys)
+{
+    (void)sys;
+    xue_error("Xue cannot be used from windows drivers");
+}
+
+static inline void *xue_sys_alloc_dma(void *sys, uint64_t order)
+{
+    (void)sys;
+    (void)order;
+
+    xue_error("Xue cannot be used from windows drivers");
+    return NULL;
+}
+
+static inline void xue_sys_free_dma(void *sys, void *addr, uint64_t order)
+{
+    (void)sys;
+    (void)addr;
+    (void)order;
+
+    xue_error("Xue cannot be used from windows drivers");
+}
+
+static inline void *xue_sys_map_xhc(void *sys, uint64_t phys, uint64_t count)
+{
+    (void)sys;
+    (void)phys;
+    (void)count;
+
+    xue_error("Xue cannot be used from windows drivers");
+    return NULL;
+}
+
+static inline void xue_sys_unmap_xhc(void *sys, void *virt, uint64_t count)
+{
+    (void)sys;
+    (void)virt;
+    (void)count;
+
+    xue_error("Xue cannot be used from windows drivers");
+}
+
+static inline void xue_sys_outd(void *sys, uint32_t port, uint32_t data)
+{
+    (void)sys;
+    (void)port;
+    (void)data;
+
+    xue_error("Xue cannot be used from windows drivers");
+}
+
+static inline uint32_t xue_sys_ind(void *sys, uint32_t port)
+{
+    (void)sys;
+    (void)port;
+
+    xue_error("Xue cannot be used from windows drivers");
+    return 0U;
+}
+
+static inline uint64_t xue_sys_virt_to_dma(void *sys, const void *virt)
+{
+    (void)sys;
+    (void)virt;
+
+    xue_error("Xue cannot be used from windows drivers");
+    return 0U;
+}
+
 #endif
 
 /* UEFI driver (based on gnuefi) */
@@ -1045,7 +1124,7 @@ static inline void xue_trb_ring_init(const struct xue *xue,
     ring->enq = 0;
     ring->deq = 0;
     ring->cyc = 1;
-    ring->db = doorbell;
+    ring->db = (uint8_t)doorbell;
 
     /*
      * Producer implies transfer ring, so we have to place a
