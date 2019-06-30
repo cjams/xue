@@ -93,6 +93,7 @@ enum {
 extern "C" {
 static inline int xue_sys_init(void *) { return 1; }
 static inline void xue_sys_sfence(void *) {}
+static inline void xue_sys_pause(void *) {}
 static inline void *xue_sys_map_xhc(void *, uint64_t, uint64_t) { return NULL; }
 static inline void xue_sys_unmap_xhc(void *sys, void *, uint64_t) {}
 static inline void *xue_sys_alloc_dma(void *, uint64_t) { return NULL; }
@@ -110,6 +111,7 @@ static inline uint64_t xue_sys_virt_to_dma(void *, const void *virt)
 /* Bareflank VMM */
 #if defined(VMM)
 #include <arch/intel_x64/barrier.h>
+#include <arch/intel_x64/pause.h>
 #include <arch/x64/portio.h>
 #include <cstdio>
 #include <debug/serial/serial_ns16550a.h>
@@ -141,6 +143,7 @@ extern "C" {
 
 static inline int xue_sys_init(void *) { return 1; }
 static inline void xue_sys_sfence(void *) { _wmb(); }
+static inline void xue_sys_pause(void *) { _pause(); }
 
 static inline uint64_t xue_sys_virt_to_dma(void *sys, const void *virt)
 {
@@ -226,6 +229,12 @@ extern "C" {
 static inline int xue_sys_init(void *sys) { return 1; }
 static inline void xue_sys_sfence(void *sys) { wmb(); }
 
+static inline void xue_sys_pause(void *sys)
+{
+    (void)sys;
+    __asm volatile("pause" ::: "memory");
+}
+
 static inline void *xue_sys_alloc_dma(void *sys, uint64_t order)
 {
     return (void *)__get_free_pages(GFP_KERNEL | GFP_DMA, order);
@@ -299,6 +308,12 @@ static inline int xue_sys_init(void *sys)
 }
 
 static inline void xue_sys_sfence(void *sys)
+{
+    (void)sys;
+    xue_error("Xue cannot be used from windows drivers");
+}
+
+static inline void xue_sys_pause(void *sys)
 {
     (void)sys;
     xue_error("Xue cannot be used from windows drivers");
@@ -609,7 +624,13 @@ static inline void xue_sys_unmap_xhc(void *sys, void *virt, uint64_t count)
 static inline void xue_sys_sfence(void *sys)
 {
     (void)sys;
-    __asm volatile("sfence");
+    __asm volatile("sfence" ::: "memory");
+}
+
+static inline void xue_sys_pause(void *sys)
+{
+    (void)sys;
+    __asm volatile("pause" ::: "memory");
 }
 #endif
 
@@ -629,6 +650,12 @@ static inline int xue_sys_init(void *sys) { return 1; }
 static inline void xue_sys_sfence(void *sys) { wmb(); }
 static inline void xue_sys_unmap_xhc(void *sys, void *virt, uint64_t count) {}
 static inline void xue_sys_free_dma(void *sys, void *addr, uint64_t order) {}
+
+static inline void xue_sys_pause(void *sys)
+{
+    (void)sys;
+    __asm volatile("pause" ::: "memory");
+}
 
 static inline void *xue_sys_alloc_dma(void *sys, uint64_t order)
 {
@@ -873,25 +900,22 @@ struct xue_ops {
 
     /**
      * Perform a write memory barrier
-     *
      * @param sys a pointer to a system-specific data structure
      */
     void (*sfence)(void *sys);
+
+    /**
+     * Pause CPU execution
+     * @param sys a pointer to a system-specific data structure
+     */
+    void (*pause)(void *sys);
 };
 
 /* @cond */
 
 struct xue {
-    int open;
-    int sysid;
-    void *sys;
     struct xue_ops *ops;
-
-    uint32_t xhc_cf8;
-    uint64_t xhc_mmio_phys;
-    uint64_t xhc_mmio_size;
-    uint64_t xhc_dbc_offset;
-    void *xhc_mmio;
+    void *sys;
 
     struct xue_dbc_reg *dbc_reg;
     struct xue_dbc_ctx *dbc_ctx;
@@ -901,7 +925,16 @@ struct xue {
     struct xue_trb_ring dbc_iring;
     struct xue_work_ring dbc_owork;
     char *dbc_str;
+
+    uint32_t xhc_cf8;
+    uint64_t xhc_mmio_phys;
+    uint64_t xhc_mmio_size;
+    uint64_t xhc_dbc_offset;
+    void *xhc_mmio;
+
     int dma_allocated;
+    int open;
+    int sysid;
 };
 
 static inline void *xue_mset(void *dest, int c, uint64_t size)
@@ -1211,6 +1244,7 @@ static inline void xue_pop_events(struct xue *xue)
         switch (xue_trb_type(event)) {
         case xue_trb_tfre:
             if (xue_trb_tfre_cc(event) != xue_trb_cc_success) {
+                xue_alert("tfre error cc: %u\n", xue_trb_tfre_cc(event));
                 break;
             }
             tr->deq =
@@ -1232,14 +1266,6 @@ static inline void xue_pop_events(struct xue *xue)
     erdp |= (er->deq << trb_shift);
     xue->ops->sfence(xue->sys);
     xue->dbc_reg->erdp = erdp;
-}
-
-static inline void xue_enable_dbc(struct xue *xue)
-{
-    xue->ops->sfence(xue->sys);
-    xue->dbc_reg->ctrl |= (1UL << XUE_CTRL_DCE);
-    xue->ops->sfence(xue->sys);
-    xue->dbc_reg->portsc |= (1UL << XUE_PSC_PED);
 }
 
 /**
@@ -1292,12 +1318,32 @@ static inline void xue_init_strings(struct xue *xue, uint32_t *info)
     info[8] = (4 << 24) | (30 << 16) | (8 << 8) | 6;
 }
 
+static inline void xue_enable_dbc(struct xue *xue)
+{
+    void *sys = xue->sys;
+    struct xue_ops *ops = xue->ops;
+    struct xue_dbc_reg *reg = xue->dbc_reg;
+
+    ops->sfence(sys);
+    reg->ctrl |= (1UL << XUE_CTRL_DCE);
+    ops->sfence(sys);
+    reg->portsc |= (1UL << XUE_PSC_PED);
+
+    while ((reg->ctrl & (1UL << XUE_CTRL_DCR)) == 0) {
+        ops->pause(sys);
+    }
+}
+
 static inline void xue_disable_dbc(struct xue *xue)
 {
-    xue->dbc_reg->portsc &= ~(1UL << XUE_PSC_PED);
-    xue->ops->sfence(xue->sys);
-    xue->dbc_reg->ctrl &= ~(1UL << XUE_CTRL_DCE);
-    xue->ops->sfence(xue->sys);
+    void *sys = xue->sys;
+    struct xue_ops *ops = xue->ops;
+    struct xue_dbc_reg *reg = xue->dbc_reg;
+
+    reg->portsc &= ~(1UL << XUE_PSC_PED);
+    ops->sfence(sys);
+    reg->ctrl &= ~(1UL << XUE_CTRL_DCE);
+    ops->sfence(sys);
 }
 
 static inline int xue_init_dbc(struct xue *xue)
@@ -1484,6 +1530,7 @@ static inline void xue_init_ops(struct xue *xue, struct xue_ops *ops)
     xue_set_op(ind);
     xue_set_op(virt_to_dma);
     xue_set_op(sfence);
+    xue_set_op(pause);
 
     xue->ops = ops;
 }
@@ -1538,6 +1585,7 @@ static inline int64_t xue_open(struct xue *xue, struct xue_ops *ops, void *sys)
     xue_init_work_ring(xue, &xue->dbc_owork);
     xue_enable_dbc(xue);
     xue->open = 1;
+
     return 1;
 }
 
@@ -1569,6 +1617,7 @@ static inline void xue_flush(struct xue *xue, struct xue_trb_ring *trb,
     xue_pop_events(xue);
 
     if (!(reg->ctrl & (1UL << XUE_CTRL_DCR))) {
+        xue_error("DbC not configured");
         return;
     }
 
@@ -1652,7 +1701,7 @@ static inline int64_t xue_putc(struct xue *xue, char c)
 /**
  * Disable the DbC and free DMA and MMIO resources back to the host system.
  *
- * @param xue the xue close
+ * @param xue the xue to close
  */
 static inline void xue_close(struct xue *xue)
 {
