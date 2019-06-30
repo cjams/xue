@@ -882,6 +882,7 @@ struct xue_ops {
 /* @cond */
 
 struct xue {
+    int open;
     int sysid;
     void *sys;
     struct xue_ops *ops;
@@ -1291,7 +1292,7 @@ static inline void xue_init_strings(struct xue *xue, uint32_t *info)
     info[8] = (4 << 24) | (30 << 16) | (8 << 8) | 6;
 }
 
-static inline void xue_reset_dbc(struct xue *xue)
+static inline void xue_disable_dbc(struct xue *xue)
 {
     xue->dbc_reg->portsc &= ~(1UL << XUE_PSC_PED);
     xue->ops->sfence(xue->sys);
@@ -1313,7 +1314,7 @@ static inline int xue_init_dbc(struct xue *xue)
     }
 
     xue->dbc_reg = reg;
-    xue_reset_dbc(xue);
+    xue_disable_dbc(xue);
 
     xue_trb_ring_init(xue, &xue->dbc_ering, 0, XUE_DB_INVAL);
     xue_trb_ring_init(xue, &xue->dbc_oring, 1, XUE_DB_OUT);
@@ -1347,26 +1348,28 @@ static inline int xue_init_dbc(struct xue *xue)
     return 1;
 }
 
-static inline void xue_free_dma(struct xue *xue)
+static inline void xue_free(struct xue *xue)
 {
+    void *sys = xue->sys;
     struct xue_ops *ops = xue->ops;
 
     if (!ops->free_dma) {
         return;
     }
 
-    ops->free_dma(xue->sys, xue->dbc_str, 0);
-    ops->free_dma(xue->sys, xue->dbc_owork.buf, XUE_WORK_RING_ORDER);
-    ops->free_dma(xue->sys, xue->dbc_iring.trb, XUE_TRB_RING_ORDER);
-    ops->free_dma(xue->sys, xue->dbc_oring.trb, XUE_TRB_RING_ORDER);
-    ops->free_dma(xue->sys, xue->dbc_ering.trb, XUE_TRB_RING_ORDER);
-    ops->free_dma(xue->sys, xue->dbc_erst, 0);
-    ops->free_dma(xue->sys, xue->dbc_ctx, 0);
-
+    ops->free_dma(sys, xue->dbc_str, 0);
+    ops->free_dma(sys, xue->dbc_owork.buf, XUE_WORK_RING_ORDER);
+    ops->free_dma(sys, xue->dbc_iring.trb, XUE_TRB_RING_ORDER);
+    ops->free_dma(sys, xue->dbc_oring.trb, XUE_TRB_RING_ORDER);
+    ops->free_dma(sys, xue->dbc_ering.trb, XUE_TRB_RING_ORDER);
+    ops->free_dma(sys, xue->dbc_erst, 0);
+    ops->free_dma(sys, xue->dbc_ctx, 0);
     xue->dma_allocated = 0;
+
+    ops->unmap_xhc(sys, xue->xhc_mmio, xue->xhc_mmio_size);
 }
 
-static inline int xue_alloc_dma(struct xue *xue)
+static inline int xue_alloc(struct xue *xue)
 {
     void *sys = xue->sys;
     struct xue_ops *ops = xue->ops;
@@ -1438,18 +1441,6 @@ free_ctx:
     return 0;
 }
 
-static inline int xue_alloc_dbc(struct xue *xue)
-{
-    if (!xue_alloc_dma(xue)) {
-        xue_error("xue_alloc_dma failed\n");
-        return 0;
-    }
-
-    return 1;
-}
-
-static inline void xue_free_dbc(struct xue *xue) { xue_free_dma(xue); }
-
 static inline void xue_dump(struct xue *xue)
 {
     struct xue_ops *op = xue->ops;
@@ -1497,6 +1488,14 @@ static inline void xue_init_ops(struct xue *xue, struct xue_ops *ops)
     xue->ops = ops;
 }
 
+static inline void xue_init_work_ring(struct xue *xue,
+                                      struct xue_work_ring *wrk)
+{
+    wrk->enq = 0;
+    wrk->deq = 0;
+    wrk->phys = xue->ops->virt_to_dma(xue->sys, wrk->buf);
+}
+
 /* @endcond */
 
 /**
@@ -1527,21 +1526,18 @@ static inline int64_t xue_open(struct xue *xue, struct xue_ops *ops, void *sys)
         return 0;
     }
 
-    if (!xue_alloc_dbc(xue)) {
+    if (!xue_alloc(xue)) {
         return 0;
     }
 
     if (!xue_init_dbc(xue)) {
-        xue_free_dbc(xue);
-        ops->unmap_xhc(sys, xue->xhc_mmio, xue->xhc_mmio_size);
+        xue_free(xue);
         return 0;
     }
 
-    xue->dbc_owork.enq = 0;
-    xue->dbc_owork.deq = 0;
-    xue->dbc_owork.phys = ops->virt_to_dma(sys, xue->dbc_owork.buf);
-
+    xue_init_work_ring(xue, &xue->dbc_owork);
     xue_enable_dbc(xue);
+    xue->open = 1;
     return 1;
 }
 
@@ -1559,6 +1555,17 @@ static inline void xue_flush(struct xue *xue, struct xue_trb_ring *trb,
 {
     struct xue_dbc_reg *reg = xue->dbc_reg;
     uint32_t db = (reg->db & 0xFFFF00FF) | (trb->db << 8);
+
+    if (xue->open && !(reg->ctrl & (1UL << XUE_CTRL_DCE))) {
+        if (!xue_init_dbc(xue)) {
+            xue_free(xue);
+            return;
+        }
+
+        xue_init_work_ring(xue, &xue->dbc_owork);
+        xue_enable_dbc(xue);
+    }
+
     xue_pop_events(xue);
 
     if (!(reg->ctrl & (1UL << XUE_CTRL_DCR))) {
@@ -1649,9 +1656,9 @@ static inline int64_t xue_putc(struct xue *xue, char c)
  */
 static inline void xue_close(struct xue *xue)
 {
-    xue_reset_dbc(xue);
-    xue_free_dbc(xue);
-    xue->ops->unmap_xhc(xue->sys, xue->xhc_mmio, xue->xhc_mmio_size);
+    xue_disable_dbc(xue);
+    xue_free(xue);
+    xue->open = 0;
 }
 
 #ifdef __cplusplus
