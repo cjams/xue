@@ -32,21 +32,22 @@ A/A crossover cable that can be purchased
 The final requirement is that the cable must be connected directly to a root
 Super-Speed port on the target, i.e., it will not work through a hub.
 
-### Target-side Usage
+### Debug Targets
 
-Xue is officially supported to run from the following environments (examples are linked):
+Xue is officially supported to run from the following environments:
 
-  - UEFI [applications](https://github.com/connojd/hypervisor/blob/xue/bfdriver/src/platform/efi/entry.c#L267) (based on gnuefi)
-  - Linux kernel [modules](https://github.com/connojd/hypervisor/blob/xue/bfdriver/src/platform/linux/entry.c#L530)
+  - UEFI [applications](test/test_efi.c) (based on gnuefi)
+  - Linux kernel [modules](https://github.com/connojd/hypervisor/blob/xue/bfdriver/src/common.c#L373)
   - Bareflank [hypervisor](https://github.com/connojd/hypervisor/blob/xue/bfvmm/src/debug/unistd.cpp#L53)
-  - Xen [hypervisor](https://github.com/connojd/xen/blob/xue/xen/drivers/char/xue.c#L147)
+  - Xen [hypervisor](https://github.com/connojd/xen/blob/xue/xen/drivers/char/xue.c)
 
 > **NOTE:** To use the Xen example above, pass 'console=dbgp dbgp=xue' on the Xen command line
 
 Xue requires a set of operations to properly communicate with the DbC hardware.
 These operations are defined in `struct xue_ops` in `xue.h`. Xue provides default
 implementations of these operations for each of the four systems above. However,
-you may override each of these defaults in order to adapt xue to your target system. To use xue in your own project, follow these steps:
+you may override each of these defaults in order to adapt xue to your target system.
+To use xue in your own project, follow these steps:
 
   1. Ensure `include/xue.h` is in your include path
   2. Allocate and clear a `struct xue` and `struct xue_ops`
@@ -59,21 +60,22 @@ Any NULL members of the `struct xue_ops` passed to `xue_open` will be set
 to the xue_sys_* defaults defined for that system. If a member is not NULL,
 then xue assumes it is a user-defined override and will simply call it.
 
-### Host-side Usage
+### Debug Hosts
 
-You can read the data from the debug host using one of the scripts in the
-`scripts` directory. There you can run `scripts/read.sh` from Linux
-hosts. A command such as
+Xue itself runs on the target machine and sends any data provided to
+`xue_write` to the debug host, which can be either Linux or Windows.
+Each host platform has its own instructions outlined below you should
+follow in order to read data from xue.
 
-```bash
-$ ./scripts/read.sh /dev/ttyUSB0
-```
+#### Linux
 
-will wait until the given device file exists, then it will continuously write
-its contents to stdout. You may need to use a ttyUSB1 or ttyUSB2 if you already
-have USB serial devices plugged in. If you are unsure which device file to use,
-grep dmesg for 'Xue DbC Driver' and look for the file that the usb_debug
-driver created for it.
+Xue presents itself as the xhci_dbc device over USB. This means that the Linux
+driver on the host will bind the xhci_dbc driver to the device and will create
+/dev/ttyUSBx file that can be read. You can read this file like any other
+serial device, however the `scripts/read.sh` is provided to handle common
+things like disconnects that may occur during development.
+
+#### Windows 10
 
 If your debug host is Windows 10, then you can use the `scripts/read.py` script
 to read the target's output, but there are a few steps you need to do before
@@ -81,7 +83,7 @@ the script will work:
   - Install [zadig](https://zadig.akeo.ie)
   - Run zadig as admin
   - Click 'Device' -> 'Create New Device'
-  - Enter 'Xue DbC Driver' in the top text box
+  - Enter 'Xue DbC Device' in the top text box
   - Enter '1D6B' in the left text box of USB ID
   - Enter '0010' in the middle text box of USB ID
   - Click 'Install Driver'
@@ -110,11 +112,11 @@ output from the debug target.
     knows a workaround for this, please share.
 
   - The DbC is subject to USB host controller resets. This means if any other
-    code resets the host controller, the DbC is reset as well. Unfortunately
-    Linux does this on every boot. One workaround is to pass 'usbcore.nousb'
-    on the kernel commandline prior to booting. Providing this parameter means
-    you will have no USB at all, but depending on your ~desperation~ debugging scenario this
-    may be acceptable, e.g., you can ssh into the target machine after boot.
+    code resets the host controller, the DbC is reset as well. This means that
+    if you `xue_open` from EFI, the DbC will be reset. Xue checks if this
+    occured before each write, and will re-initialize the device if it has been
+    reset, but this could lead to data loss depending on when the host
+    controller was reset.
 
   - The DbC is subject to DMA remapping. If the USB host controller is being
     remapped by an IOMMU, then the default xue_sys_* functions provided in
@@ -124,7 +126,7 @@ output from the debug target.
 
 To run the unit tests, pass -DBUILD_TESTS=ON to `cmake`. Then run `make test`.
 This runs the actual test and performs static analysis of the resulting binary
-with clang-tidy.
+with `clang-tidy`.
 
 ### Documentation
 
