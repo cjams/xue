@@ -35,6 +35,8 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE img, EFI_SYSTEM_TABLE *systab)
     ZeroMem((VOID *)&ops, sizeof(ops));
     ZeroMem((VOID *)&sys, sizeof(sys));
 
+    xue.sysid = xue_sysid_efi;
+
     if (!xue_open(&xue, &ops, &sys)) {
         return EFI_DEVICE_ERROR;
     }

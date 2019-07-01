@@ -126,6 +126,7 @@ static void setup_mmio()
 
     dbc_regs = reinterpret_cast<struct xue_dbc_reg *>(xhc_mmio.data() + dbc_offset);
     dbc_regs->id = 0xA;
+    dbc_regs->ctrl |= 1;
 }
 
 static void clear_mmio()
@@ -360,7 +361,7 @@ TEST_CASE("xue_trb_ring_init")
     ops.free_dma = free_dma;
 
     xue_init_ops(&xue, &ops);
-    xue_alloc_dma(&xue);
+    xue_alloc(&xue);
 
     prod_ring.trb = xue.dbc_oring.trb;
     cons_ring.trb = xue.dbc_ering.trb;
@@ -384,7 +385,7 @@ TEST_CASE("xue_trb_ring_init")
     struct xue_trb *prod_end = &prod_ring.trb[XUE_TRB_RING_CAP - 1];
     CHECK(xue_trb_type(prod_end) == xue_trb_link);
 
-    xue_free_dma(&xue);
+    xue_free(&xue);
 }
 
 TEST_CASE("xue_push_trb")
@@ -397,7 +398,7 @@ TEST_CASE("xue_push_trb")
     ops.free_dma = free_dma;
 
     xue_init_ops(&xue, &ops);
-    xue_alloc_dma(&xue);
+    xue_alloc(&xue);
 
     ring.trb = xue.dbc_oring.trb;
     xue_trb_ring_init(&xue, &ring, 1, XUE_DB_OUT);
@@ -412,7 +413,7 @@ TEST_CASE("xue_push_trb")
     CHECK(ring.enq == 1);
     CHECK(ring.cyc == 0);
 
-    xue_free_dma(&xue);
+    xue_free(&xue);
 }
 
 TEST_CASE("xue_push_work")
@@ -425,7 +426,7 @@ TEST_CASE("xue_push_work")
     ops.free_dma = free_dma;
 
     xue_init_ops(&xue, &ops);
-    xue_alloc_dma(&xue);
+    xue_alloc(&xue);
 
     ring.enq = 0;
     ring.deq = 0;
@@ -447,7 +448,7 @@ TEST_CASE("xue_push_work")
     CHECK(xue_work_ring_full(&ring));
     CHECK(xue_work_ring_size(&ring) == XUE_WORK_RING_CAP - 1);
 
-    xue_free_dma(&xue);
+    xue_free(&xue);
 }
 
 TEST_CASE("xue_pop_events")
@@ -462,7 +463,7 @@ TEST_CASE("xue_pop_events")
     ops.free_dma = free_dma;
 
     xue_init_ops(&xue, &ops);
-    xue_alloc_dma(&xue);
+    xue_alloc(&xue);
     xue.dbc_reg = &reg;
     xue.dbc_reg->erdp = 0x2000;
 

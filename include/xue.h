@@ -93,6 +93,7 @@ enum {
 extern "C" {
 static inline int xue_sys_init(void *) { return 1; }
 static inline void xue_sys_sfence(void *) {}
+static inline void xue_sys_lfence(void *) {}
 static inline void xue_sys_pause(void *) {}
 static inline void *xue_sys_map_xhc(void *, uint64_t, uint64_t) { return NULL; }
 static inline void xue_sys_unmap_xhc(void *sys, void *, uint64_t) {}
@@ -143,6 +144,7 @@ extern "C" {
 
 static inline int xue_sys_init(void *) { return 1; }
 static inline void xue_sys_sfence(void *) { _wmb(); }
+static inline void xue_sys_lfence(void *) { _rmb(); }
 static inline void xue_sys_pause(void *) { _pause(); }
 
 static inline uint64_t xue_sys_virt_to_dma(void *sys, const void *virt)
@@ -228,6 +230,7 @@ extern "C" {
 
 static inline int xue_sys_init(void *sys) { return 1; }
 static inline void xue_sys_sfence(void *sys) { wmb(); }
+static inline void xue_sys_lfence(void *sys) { rmb(); }
 
 static inline void xue_sys_pause(void *sys)
 {
@@ -308,6 +311,12 @@ static inline int xue_sys_init(void *sys)
 }
 
 static inline void xue_sys_sfence(void *sys)
+{
+    (void)sys;
+    xue_error("Xue cannot be used from windows drivers");
+}
+
+static inline void xue_sys_lfence(void *sys)
 {
     (void)sys;
     xue_error("Xue cannot be used from windows drivers");
@@ -491,7 +500,6 @@ static inline void *xue_sys_alloc_dma(void *sys, uint64_t order)
     dma->pages = pages;
     dma->cpu_addr = addr;
 
-    xue_debug("dma allocated: addr: 0x%llx pages: %u\n", addr, pages);
     return addr;
 }
 
@@ -627,6 +635,12 @@ static inline void xue_sys_sfence(void *sys)
     __asm volatile("sfence" ::: "memory");
 }
 
+static inline void xue_sys_lfence(void *sys)
+{
+    (void)sys;
+    __asm volatile("lfence" ::: "memory");
+}
+
 static inline void xue_sys_pause(void *sys)
 {
     (void)sys;
@@ -648,6 +662,7 @@ static inline void xue_sys_pause(void *sys)
 
 static inline int xue_sys_init(void *sys) { return 1; }
 static inline void xue_sys_sfence(void *sys) { wmb(); }
+static inline void xue_sys_lfence(void *sys) { rmb(); }
 static inline void xue_sys_unmap_xhc(void *sys, void *virt, uint64_t count) {}
 static inline void xue_sys_free_dma(void *sys, void *addr, uint64_t order) {}
 
@@ -814,7 +829,7 @@ struct xue_work_ring {
     uint8_t *buf;
     uint32_t enq;
     uint32_t deq;
-    uint64_t phys;
+    uint64_t dma;
 };
 
 /* @endcond */
@@ -903,6 +918,12 @@ struct xue_ops {
      * @param sys a pointer to a system-specific data structure
      */
     void (*sfence)(void *sys);
+
+    /**
+     * Perform a read memory barrier
+     * @param sys a pointer to a system-specific data structure
+     */
+    void (*lfence)(void *sys);
 
     /**
      * Pause CPU execution
@@ -1235,10 +1256,16 @@ static inline int64_t xue_push_work(struct xue_work_ring *ring, const char *buf,
 static inline void xue_pop_events(struct xue *xue)
 {
     const int trb_shift = 4;
+
+    void *sys = xue->sys;
+    struct xue_ops *ops = xue->ops;
+    struct xue_dbc_reg *reg = xue->dbc_reg;
     struct xue_trb_ring *er = &xue->dbc_ering;
     struct xue_trb_ring *tr = &xue->dbc_oring;
     struct xue_trb *event = &er->trb[er->deq];
-    uint64_t erdp = xue->dbc_reg->erdp;
+    uint64_t erdp = reg->erdp;
+
+    ops->lfence(sys);
 
     while (xue_trb_cyc(event) == er->cyc) {
         switch (xue_trb_type(event)) {
@@ -1251,7 +1278,7 @@ static inline void xue_pop_events(struct xue *xue)
                 (xue_trb_tfre_ptr(event) & XUE_TRB_RING_MASK) >> trb_shift;
             break;
         case xue_trb_psce:
-            xue->dbc_reg->portsc |= (XUE_PSC_ACK_MASK & xue->dbc_reg->portsc);
+            reg->portsc |= (XUE_PSC_ACK_MASK & reg->portsc);
             break;
         default:
             break;
@@ -1264,8 +1291,8 @@ static inline void xue_pop_events(struct xue *xue)
 
     erdp &= ~XUE_TRB_RING_MASK;
     erdp |= (er->deq << trb_shift);
-    xue->ops->sfence(xue->sys);
-    xue->dbc_reg->erdp = erdp;
+    ops->sfence(sys);
+    reg->erdp = erdp;
 }
 
 /**
@@ -1303,7 +1330,7 @@ static inline void xue_init_strings(struct xue *xue, uint32_t *info)
         8,  3, 'A', 0, 'I', 0, 'S', 0,
         30, 3, 'X', 0, 'u', 0, 'e', 0, ' ', 0,
                'D', 0, 'b', 0, 'C', 0, ' ', 0,
-               'D', 0, 'r', 0, 'i', 0, 'v', 0, 'e', 0, 'r', 0,
+               'D', 0, 'e', 0, 'v', 0, 'i', 0, 'c', 0, 'e', 0,
         4, 3, '0', 0
     };
     /* clang-format on */
@@ -1328,6 +1355,13 @@ static inline void xue_enable_dbc(struct xue *xue)
     reg->ctrl |= (1UL << XUE_CTRL_DCE);
     ops->sfence(sys);
     reg->portsc |= (1UL << XUE_PSC_PED);
+
+    if (xue->sysid == xue_sysid_efi) {
+        xue_debug("Please insert the debug cable to continue...");
+    }
+
+    ops->sfence(sys);
+    ops->lfence(sys);
 
     while ((reg->ctrl & (1UL << XUE_CTRL_DCR)) == 0) {
         ops->pause(sys);
@@ -1530,6 +1564,7 @@ static inline void xue_init_ops(struct xue *xue, struct xue_ops *ops)
     xue_set_op(ind);
     xue_set_op(virt_to_dma);
     xue_set_op(sfence);
+    xue_set_op(lfence);
     xue_set_op(pause);
 
     xue->ops = ops;
@@ -1540,7 +1575,7 @@ static inline void xue_init_work_ring(struct xue *xue,
 {
     wrk->enq = 0;
     wrk->deq = 0;
-    wrk->phys = xue->ops->virt_to_dma(xue->sys, wrk->buf);
+    wrk->dma = xue->ops->virt_to_dma(xue->sys, wrk->buf);
 }
 
 /* @endcond */
@@ -1634,13 +1669,13 @@ static inline void xue_flush(struct xue *xue, struct xue_trb_ring *trb,
     if (wrk->enq == wrk->deq) {
         return;
     } else if (wrk->enq > wrk->deq) {
-        xue_push_trb(trb, wrk->phys + wrk->deq, wrk->enq - wrk->deq);
+        xue_push_trb(trb, wrk->dma + wrk->deq, wrk->enq - wrk->deq);
         wrk->deq = wrk->enq;
     } else {
-        xue_push_trb(trb, wrk->phys + wrk->deq, XUE_WORK_RING_CAP - wrk->deq);
+        xue_push_trb(trb, wrk->dma + wrk->deq, XUE_WORK_RING_CAP - wrk->deq);
         wrk->deq = 0;
         if (wrk->enq > 0 && !xue_trb_ring_full(trb)) {
-            xue_push_trb(trb, wrk->phys, wrk->enq);
+            xue_push_trb(trb, wrk->dma, wrk->enq);
             wrk->deq = wrk->enq;
         }
     }
