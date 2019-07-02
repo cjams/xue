@@ -1353,15 +1353,26 @@ static inline void xue_enable_dbc(struct xue *xue)
 
     ops->sfence(sys);
     reg->ctrl |= (1UL << XUE_CTRL_DCE);
-    ops->sfence(sys);
-    reg->portsc |= (1UL << XUE_PSC_PED);
-
-    if (xue->sysid == xue_sysid_efi) {
-        xue_debug("Please insert the debug cable to continue...");
+    while ((reg->ctrl & (1UL << XUE_CTRL_DCE)) == 0) {
+        ops->pause(sys);
     }
 
-    ops->sfence(sys);
-    ops->lfence(sys);
+    reg->portsc |= (1UL << XUE_PSC_PED);
+
+    /*
+     * TODO:
+     *
+     * There is a slight difference in behavior between enabling the DbC from
+     * pre and post-EFI. From post-EFI, if the cable is connected when the DbC
+     * is enabled, the host automatically enumerates the DbC. Pre-EFI, you
+     * have to plug the cable in after the DCE bit is set for it to enumerate.
+     * I suspect the difference is due to the state of the port prior to
+     * initializing the DbC. Section 4.19.1.2.4.2 seems like a good place to
+     * start a deeper investigation into this.
+     */
+    if (xue->sysid == xue_sysid_efi) {
+        xue_debug("Please insert the debug cable to continue...\n");
+    }
 
     while ((reg->ctrl & (1UL << XUE_CTRL_DCR)) == 0) {
         ops->pause(sys);
@@ -1377,7 +1388,10 @@ static inline void xue_disable_dbc(struct xue *xue)
     reg->portsc &= ~(1UL << XUE_PSC_PED);
     ops->sfence(sys);
     reg->ctrl &= ~(1UL << XUE_CTRL_DCE);
-    ops->sfence(sys);
+
+    while (reg->ctrl & (1UL << XUE_CTRL_DCE)) {
+        ops->pause(sys);
+    }
 }
 
 static inline int xue_init_dbc(struct xue *xue)
