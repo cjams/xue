@@ -1345,6 +1345,31 @@ static inline void xue_init_strings(struct xue *xue, uint32_t *info)
     info[8] = (4 << 24) | (30 << 16) | (8 << 8) | 6;
 }
 
+static inline void xue_dump(struct xue *xue)
+{
+    struct xue_ops *op = xue->ops;
+    struct xue_dbc_reg *r = xue->dbc_reg;
+
+    xue_debug("XUE DUMP:\n");
+    xue_debug("    ctrl: 0x%x stat: 0x%x psc: 0x%x\n", r->ctrl, r->st,
+              r->portsc);
+    xue_debug("    id: 0x%x, db: 0x%x\n", r->id, r->db);
+#if defined(__XEN__) || defined(VMM)
+    xue_debug("    erstsz: %u, erstba: 0x%lx\n", r->erstsz, r->erstba);
+    xue_debug("    erdp: 0x%lx, cp: 0x%lx\n", r->erdp, r->cp);
+#else
+    xue_debug("    erstsz: %u, erstba: 0x%llx\n", r->erstsz, r->erstba);
+    xue_debug("    erdp: 0x%llx, cp: 0x%llx\n", r->erdp, r->cp);
+#endif
+    xue_debug("    ddi1: 0x%x, ddi2: 0x%x\n", r->ddi1, r->ddi2);
+    xue_debug("    erstba == virt_to_dma(erst): %d\n",
+              r->erstba == op->virt_to_dma(xue->sys, xue->dbc_erst));
+    xue_debug("    erdp == virt_to_dma(erst[0].base): %d\n",
+              r->erdp == xue->dbc_erst[0].base);
+    xue_debug("    cp == virt_to_dma(ctx): %d\n",
+              r->cp == op->virt_to_dma(xue->sys, xue->dbc_ctx));
+}
+
 static inline void xue_enable_dbc(struct xue *xue)
 {
     void *sys = xue->sys;
@@ -1365,7 +1390,9 @@ static inline void xue_enable_dbc(struct xue *xue)
      * There is a slight difference in behavior between enabling the DbC from
      * pre and post-EFI. From post-EFI, if the cable is connected when the DbC
      * is enabled, the host automatically enumerates the DbC. Pre-EFI, you
-     * have to plug the cable in after the DCE bit is set for it to enumerate.
+     * have to plug the cable in after the DCE bit is set on some systems
+     * for it to enumerate.
+     *
      * I suspect the difference is due to the state of the port prior to
      * initializing the DbC. Section 4.19.1.2.4.2 seems like a good place to
      * start a deeper investigation into this.
@@ -1533,31 +1560,6 @@ free_ctx:
     ops->free_dma(sys, xue->dbc_ctx, 0);
 
     return 0;
-}
-
-static inline void xue_dump(struct xue *xue)
-{
-    struct xue_ops *op = xue->ops;
-    struct xue_dbc_reg *r = xue->dbc_reg;
-
-    xue_debug("XUE DUMP:\n");
-    xue_debug("    ctrl: 0x%x stat: 0x%x psc: 0x%x\n", r->ctrl, r->st,
-              r->portsc);
-    xue_debug("    id: 0x%x, db: 0x%x\n", r->id, r->db);
-#if defined(__XEN__) || defined(VMM)
-    xue_debug("    erstsz: %u, erstba: 0x%lx\n", r->erstsz, r->erstba);
-    xue_debug("    erdp: 0x%lx, cp: 0x%lx\n", r->erdp, r->cp);
-#else
-    xue_debug("    erstsz: %u, erstba: 0x%llx\n", r->erstsz, r->erstba);
-    xue_debug("    erdp: 0x%llx, cp: 0x%llx\n", r->erdp, r->cp);
-#endif
-    xue_debug("    ddi1: 0x%x, ddi2: 0x%x\n", r->ddi1, r->ddi2);
-    xue_debug("    erstba == virt_to_dma(erst): %d\n",
-              r->erstba == op->virt_to_dma(xue->sys, xue->dbc_erst));
-    xue_debug("    erdp == virt_to_dma(erst[0].base): %d\n",
-              r->erdp == xue->dbc_erst[0].base);
-    xue_debug("    cp == virt_to_dma(ctx): %d\n",
-              r->cp == op->virt_to_dma(xue->sys, xue->dbc_ctx));
 }
 
 #define xue_set_op(op)                                                         \
