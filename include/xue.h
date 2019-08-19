@@ -143,8 +143,8 @@ extern "C" {
 #endif
 
 static inline int xue_sys_init(void *) { return 1; }
-static inline void xue_sys_sfence(void *) { _wmb(); }
-static inline void xue_sys_lfence(void *) { _rmb(); }
+static inline void xue_sys_sfence(void *) { wmb(); }
+static inline void xue_sys_lfence(void *) { rmb(); }
 static inline void xue_sys_pause(void *) { _pause(); }
 
 static inline uint64_t xue_sys_virt_to_dma(void *sys, const void *virt)
