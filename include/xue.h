@@ -119,23 +119,19 @@ static inline uint64_t xue_sys_virt_to_dma(void *, const void *virt)
 #include <arch/x64/cache.h>
 #include <arch/x64/portio.h>
 #include <cstdio>
+#include <string>
 #include <debug/serial/serial_ns16550a.h>
 #include <memory_manager/arch/x64/cr3.h>
 #include <memory_manager/memory_manager.h>
 
 static_assert(XUE_PAGE_SIZE == BAREFLANK_PAGE_SIZE);
+extern "C" void debug_ring_write(const std::string &str);
 
 #define xue_printf(...)                                                        \
     do {                                                                       \
-        char buf[256];                                                         \
+        char buf[256]{0};                                                      \
         snprintf(buf, 256, __VA_ARGS__);                                       \
-        for (int i = 0; i < 256; i++) {                                        \
-            if (buf[i]) {                                                      \
-                bfvmm::DEFAULT_COM_DRIVER::instance()->write(buf[i]);          \
-            } else {                                                           \
-                break;                                                         \
-            }                                                                  \
-        }                                                                      \
+        debug_ring_write(buf);                                                 \
     } while (0)
 
 #define xue_debug(...) xue_printf("xue debug: " __VA_ARGS__)
@@ -826,7 +822,7 @@ struct xue_dbc_reg {
 
 /* Defines the size in bytes of TRB rings as 2^XUE_TRB_RING_ORDER * 4096 */
 #ifndef XUE_TRB_RING_ORDER
-#define XUE_TRB_RING_ORDER 4
+#define XUE_TRB_RING_ORDER 2
 #endif
 #define XUE_TRB_RING_CAP (XUE_TRB_PER_PAGE * (1ULL << XUE_TRB_RING_ORDER))
 #define XUE_TRB_RING_BYTES (XUE_TRB_RING_CAP * sizeof(struct xue_trb))
@@ -993,6 +989,8 @@ struct xue {
     int dma_allocated;
     int open;
     int sysid;
+    int bytes_written;
+    int trbs_written;
 };
 
 static inline void *xue_mset(void *dest, int c, uint64_t size)
@@ -1240,7 +1238,9 @@ static inline void xue_trb_ring_init(const struct xue *xue,
      */
     if (producer) {
         struct xue_trb *trb = &ring->trb[XUE_TRB_RING_CAP - 1];
+
         xue_trb_set_type(trb, xue_trb_link);
+
         xue_trb_link_set_tc(trb);
         xue_trb_link_set_rsp(trb, xue->ops->virt_to_dma(xue->sys, ring->trb));
     }
@@ -1271,6 +1271,15 @@ static inline void xue_push_trb(struct xue *xue, struct xue_trb_ring *ring,
     struct xue_trb trb;
 
     if (ring->enq == XUE_TRB_RING_CAP - 1) {
+        /*
+         * We have to make sure the xHC processes the link TRB in order
+         * for wrap-around to work properly. We do this by marking the
+         * xHC as owner of the link TRB by setting the TRB's cycle bit
+         * (just like with normal TRBs).
+         */
+        struct xue_trb *link = &ring->trb[ring->enq];
+        xue_trb_set_cyc(link, ring->cyc);
+
         ring->enq = 0;
         ring->cyc ^= 1;
     }
@@ -1287,7 +1296,9 @@ static inline void xue_push_trb(struct xue *xue, struct xue_trb_ring *ring,
     xue_trb_norm_set_ioc(&trb);
 
     ring->trb[ring->enq++] = trb;
+    xue->ops->sfence(xue->sys);
     xue_flush_range(xue, &ring->trb[ring->enq - 1], sizeof(trb));
+    xue->trbs_written++;
 }
 
 static inline int64_t xue_push_work(struct xue *xue,
@@ -1301,9 +1312,11 @@ static inline int64_t xue_push_work(struct xue *xue,
     while (!xue_work_ring_full(ring) && i < len) {
         ring->buf[ring->enq] = buf[i++];
         ring->enq = (ring->enq + 1) & (XUE_WORK_RING_CAP - 1);
+        xue->bytes_written++;
     }
 
     end = ring->enq;
+    xue->ops->sfence(xue->sys);
 
     if (end > start) {
         xue_flush_range(xue, &ring->buf[start], end - start);
