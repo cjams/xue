@@ -119,17 +119,17 @@ static inline uint64_t xue_sys_virt_to_dma(void *, const void *virt)
 #include <arch/x64/cache.h>
 #include <arch/x64/portio.h>
 #include <cstdio>
-#include <string>
 #include <debug/serial/serial_ns16550a.h>
 #include <memory_manager/arch/x64/cr3.h>
 #include <memory_manager/memory_manager.h>
+#include <string>
 
 static_assert(XUE_PAGE_SIZE == BAREFLANK_PAGE_SIZE);
 extern "C" void debug_ring_write(const std::string &str);
 
 #define xue_printf(...)                                                        \
     do {                                                                       \
-        char buf[256]{0};                                                      \
+        char buf[256] { 0 };                                                   \
         snprintf(buf, 256, __VA_ARGS__);                                       \
         debug_ring_write(buf);                                                 \
     } while (0)
@@ -219,8 +219,8 @@ extern "C" {
 
 /* Linux driver */
 #if defined(MODULE) && defined(__linux__)
-#include <asm/io.h>
 #include <asm/cacheflush.h>
+#include <asm/io.h>
 #include <linux/printk.h>
 #include <linux/slab.h>
 #include <linux/types.h>
@@ -662,7 +662,7 @@ static inline void xue_sys_pause(void *sys)
 static inline void xue_sys_clflush(void *sys, void *ptr)
 {
     (void)sys;
-    __asm volatile("clflush %0" : "+m" (*(volatile char *)ptr));
+    __asm volatile("clflush %0" : "+m"(*(volatile char *)ptr));
 }
 
 #endif
@@ -694,7 +694,7 @@ static inline void xue_sys_pause(void *sys)
 static inline void xue_sys_clflush(void *sys, void *ptr)
 {
     (void)sys;
-    __asm volatile("clflush %0" : "+m" (*(volatile char *)ptr));
+    __asm volatile("clflush %0" : "+m"(*(volatile char *)ptr));
 }
 
 static inline void *xue_sys_alloc_dma(void *sys, uint64_t order)
@@ -1301,9 +1301,8 @@ static inline void xue_push_trb(struct xue *xue, struct xue_trb_ring *ring,
     xue->trbs_written++;
 }
 
-static inline int64_t xue_push_work(struct xue *xue,
-                                    struct xue_work_ring *ring, const char *buf,
-                                    int64_t len)
+static inline int64_t xue_push_work(struct xue *xue, struct xue_work_ring *ring,
+                                    const char *buf, int64_t len)
 {
     int64_t i = 0;
     uint32_t start = ring->enq;
@@ -1779,7 +1778,8 @@ static inline void xue_flush(struct xue *xue, struct xue_trb_ring *trb,
         xue_push_trb(xue, trb, wrk->dma + wrk->deq, wrk->enq - wrk->deq);
         wrk->deq = wrk->enq;
     } else {
-        xue_push_trb(xue, trb, wrk->dma + wrk->deq, XUE_WORK_RING_CAP - wrk->deq);
+        xue_push_trb(xue, trb, wrk->dma + wrk->deq,
+                     XUE_WORK_RING_CAP - wrk->deq);
         wrk->deq = 0;
         if (wrk->enq > 0 && !xue_trb_ring_full(trb)) {
             xue_push_trb(xue, trb, wrk->dma, wrk->enq);

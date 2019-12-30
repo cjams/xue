@@ -19,6 +19,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#define XUE_TRB_RING_ORDER 0
+
 #include <array>
 #include <catch2/catch.hpp>
 #include <cstdio>
@@ -48,11 +50,13 @@ uint32_t pci_reg{};
 
 std::array<uint32_t, 64> xhc_cfg{};
 std::array<uint8_t, xhc_mmio_size> xhc_mmio{};
-std::array<uint32_t, 4> known_xhc_list{
+
+std::array<uint32_t, 5> known_xhc_list = {
     (XUE_XHC_DEV_Z370 << 16) | XUE_XHC_VEN_INTEL,
     (XUE_XHC_DEV_Z390 << 16) | XUE_XHC_VEN_INTEL,
     (XUE_XHC_DEV_WILDCAT_POINT << 16) | XUE_XHC_VEN_INTEL,
-    (XUE_XHC_DEV_SUNRISE_POINT << 16) | XUE_XHC_VEN_INTEL
+    (XUE_XHC_DEV_SUNRISE_POINT << 16) | XUE_XHC_VEN_INTEL,
+    (XUE_XHC_DEV_CANNON_POINT << 16) | XUE_XHC_VEN_INTEL
 };
 
 constexpr auto dbc_offset = 0x8000U;
@@ -407,7 +411,7 @@ TEST_CASE("xue_push_trb")
     CHECK(ring.cyc == 1);
 
     for (auto i = 0UL; i < XUE_TRB_RING_CAP; i++) {
-        xue_push_trb(&ring, i, 1);
+        xue_push_trb(&xue, &ring, i, 1);
     }
 
     CHECK(ring.enq == 1);
@@ -438,9 +442,9 @@ TEST_CASE("xue_push_work")
     for (auto i = 0UL; i < XUE_WORK_RING_CAP; i++) {
         char buf[1] = {1};
         if (i < XUE_WORK_RING_CAP - 1) {
-            CHECK(xue_push_work(&ring, buf, 1) == 1);
+            CHECK(xue_push_work(&xue, &ring, buf, 1) == 1);
         } else {
-            CHECK(xue_push_work(&ring, buf, 1) == 0);
+            CHECK(xue_push_work(&xue, &ring, buf, 1) == 0);
         }
     }
 
