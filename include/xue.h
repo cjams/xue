@@ -122,12 +122,13 @@ static inline uint64_t xue_sys_virt_to_dma(void *, const void *virt)
 #include <debug/serial/serial_ns16550a.h>
 #include <memory_manager/arch/x64/cr3.h>
 #include <memory_manager/memory_manager.h>
+#include <string>
 
 static_assert(XUE_PAGE_SIZE == BAREFLANK_PAGE_SIZE);
 
 #define xue_printf(...)                                                        \
     do {                                                                       \
-        char buf[256];                                                         \
+        char buf[256] { 0 };                                                   \
         snprintf(buf, 256, __VA_ARGS__);                                       \
         for (int i = 0; i < 256; i++) {                                        \
             if (buf[i]) {                                                      \
