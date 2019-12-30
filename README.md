@@ -19,6 +19,7 @@ tested to work:
   - Z390 (PCI device 0xA36D)
   - Wildcat Point-LP (PCI device 0x9CB1)
   - Sunrise Point-LP (PCI device 0x9D2F)
+  - Cannon Point-LP (PCI device 0x9DED)
 
 Devices not listed here will likely work after you add the appropriate `#define
 XUE_XHC_DEV_*` to `xue.h`. If you have a device not listed above, and/or it
