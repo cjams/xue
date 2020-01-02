@@ -97,7 +97,6 @@ static inline int xue_sys_init(void *) { return 1; }
 static inline void xue_sys_sfence(void *) {}
 static inline void xue_sys_lfence(void *) {}
 static inline void xue_sys_pause(void *) {}
-static inline void xue_sys_clflush(void *, void *) {}
 static inline void *xue_sys_map_xhc(void *, uint64_t, uint64_t) { return NULL; }
 static inline void xue_sys_unmap_xhc(void *sys, void *, uint64_t) {}
 static inline void *xue_sys_alloc_dma(void *, uint64_t) { return NULL; }
@@ -146,7 +145,6 @@ static inline int xue_sys_init(void *) { return 1; }
 static inline void xue_sys_sfence(void *) { ::intel_x64::wmb(); }
 static inline void xue_sys_lfence(void *) { ::intel_x64::rmb(); }
 static inline void xue_sys_pause(void *) { _pause(); }
-static inline void xue_sys_clflush(void *, void *ptr) { _clflush(ptr); }
 
 static inline uint64_t xue_sys_virt_to_dma(void *sys, const void *virt)
 {
@@ -233,7 +231,6 @@ extern "C" {
 static inline int xue_sys_init(void *sys) { return 1; }
 static inline void xue_sys_sfence(void *sys) { wmb(); }
 static inline void xue_sys_lfence(void *sys) { rmb(); }
-static inline void xue_sys_clflush(void *sys, void *ptr) { clflush(ptr); }
 
 static inline void xue_sys_pause(void *sys)
 {
@@ -659,12 +656,6 @@ static inline void xue_sys_pause(void *sys)
     __asm volatile("pause" ::: "memory");
 }
 
-static inline void xue_sys_clflush(void *sys, void *ptr)
-{
-    (void)sys;
-    __asm volatile("clflush %0" : "+m"(*(volatile char *)ptr));
-}
-
 #endif
 
 #if defined(__XEN__) && !defined(VMM)
@@ -689,12 +680,6 @@ static inline void xue_sys_pause(void *sys)
 {
     (void)sys;
     __asm volatile("pause" ::: "memory");
-}
-
-static inline void xue_sys_clflush(void *sys, void *ptr)
-{
-    (void)sys;
-    __asm volatile("clflush %0" : "+m"(*(volatile char *)ptr));
 }
 
 static inline void *xue_sys_alloc_dma(void *sys, uint64_t order)
@@ -956,13 +941,6 @@ struct xue_ops {
      * @param sys a pointer to a system-specific data structure
      */
     void (*pause)(void *sys);
-
-    /**
-     * Flush the cache line at the given address
-     * @param sys a pointer to a system-specific data structure
-     * @param ptr the address to flush
-     */
-    void (*clflush)(void *sys, void *ptr);
 };
 
 /* @cond */
@@ -1016,22 +994,6 @@ static inline void *xue_mcpy(void *dest, const void *src, uint64_t size)
     }
 
     return dest;
-}
-
-static inline void xue_flush_range(struct xue *xue, void *ptr, uint32_t bytes)
-{
-    uint32_t i;
-
-    const uint32_t clshft = 6;
-    const uint32_t clsize = (1UL << clshft);
-    const uint32_t clmask = clsize - 1;
-
-    uint32_t lines = (bytes >> clshft);
-    lines += (bytes & clmask) != 0;
-
-    for (i = 0; i < lines; i++) {
-        xue->ops->clflush(xue->sys, (void *)((uint64_t)ptr + (i * clsize)));
-    }
 }
 
 static inline uint32_t xue_pci_read(struct xue *xue, uint32_t cf8, uint32_t reg)
@@ -1297,7 +1259,6 @@ static inline void xue_push_trb(struct xue *xue, struct xue_trb_ring *ring,
 
     ring->trb[ring->enq++] = trb;
     xue->ops->sfence(xue->sys);
-    xue_flush_range(xue, &ring->trb[ring->enq - 1], sizeof(trb));
     xue->trbs_written++;
 }
 
@@ -1305,7 +1266,6 @@ static inline int64_t xue_push_work(struct xue *xue, struct xue_work_ring *ring,
                                     const char *buf, int64_t len)
 {
     int64_t i = 0;
-    uint32_t start = ring->enq;
     uint32_t end = 0;
 
     while (!xue_work_ring_full(ring) && i < len) {
@@ -1316,13 +1276,6 @@ static inline int64_t xue_push_work(struct xue *xue, struct xue_work_ring *ring,
 
     end = ring->enq;
     xue->ops->sfence(xue->sys);
-
-    if (end > start) {
-        xue_flush_range(xue, &ring->buf[start], end - start);
-    } else if (i > 0) {
-        xue_flush_range(xue, &ring->buf[start], XUE_WORK_RING_CAP - start);
-        xue_flush_range(xue, &ring->buf[0], end);
-    }
 
     return i;
 }
@@ -1548,13 +1501,6 @@ static inline int xue_init_dbc(struct xue *xue)
     reg->ddi1 = (XUE_DBC_VENDOR << 16) | XUE_DBC_PROTOCOL;
     reg->ddi2 = XUE_DBC_PRODUCT;
 
-    xue_flush_range(xue, xue->dbc_ctx, sizeof(*xue->dbc_ctx));
-    xue_flush_range(xue, xue->dbc_erst, sizeof(*xue->dbc_erst));
-    xue_flush_range(xue, xue->dbc_ering.trb, XUE_TRB_RING_BYTES);
-    xue_flush_range(xue, xue->dbc_oring.trb, XUE_TRB_RING_BYTES);
-    xue_flush_range(xue, xue->dbc_iring.trb, XUE_TRB_RING_BYTES);
-    xue_flush_range(xue, xue->dbc_owork.buf, XUE_WORK_RING_BYTES);
-
     return 1;
 }
 
@@ -1671,7 +1617,6 @@ static inline void xue_init_ops(struct xue *xue, struct xue_ops *ops)
     xue_set_op(sfence);
     xue_set_op(lfence);
     xue_set_op(pause);
-    xue_set_op(clflush);
 
     xue->ops = ops;
 }
