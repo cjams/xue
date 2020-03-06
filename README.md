@@ -70,17 +70,17 @@ follow in order to read data from xue.
 
 #### Linux
 
-Xue presents itself as the xhci_dbc device over USB. This means that the Linux
-driver on the host will bind the xhci_dbc driver to the device and will create
-/dev/ttyUSBx file that can be read. You can read this file like any other
-serial device, however the `scripts/read.sh` is provided to handle common
-things like disconnects that may occur during development.
+Xue presents itself as the xhci_dbc device over USB. This means that Linux
+will bind the xhci_dbc driver to the device and will create
+a /dev/ttyUSBx file that can be read. You can read this file like any other
+serial device, however the `scripts/read.sh` is provided and recommended as
+it handles common things like disconnects that may occur during development.
 
 #### Windows 10
 
-If your debug host is Windows 10, then you can use the `scripts/read.py` script
-to read the target's output, but there are a few steps you need to do before
-the script will work:
+If your debug host is Windows 10, then you can run `python scripts/read.py`
+from a terminal to read the target's output, but there are a few steps you need
+to do before the script will work:
   - Install [zadig](https://zadig.akeo.ie)
   - Run zadig as admin
   - Click 'Device' -> 'Create New Device'
@@ -95,13 +95,15 @@ the debug cable is connected and the DbC enabled.
 > **NOTE:** The DbC is considered 'enabled' after a successful call to `xue_open`.
 
 After WinUSB is installed, setup the python environment:
-  - Install the latest python
-  - Install pyusb with pip
-  - Download 7zip and libusb
-  - Unpack libusb with 7zip
-  - Copy `<libusb>/MS64/dll/libusb-1.0.dll` to `C:\Windows\System\`
+  - Install the latest **64-bit** python for Windows
+    - Select "Add Python to PATH"
+    - Select "Install Now"
+  - Install [7zip](https://www.7-zip.org/download.html) and [libusb](https://github.com/libusb/libusb/releases/download/v1.0.22/libusb-1.0.22.7z)
+  - Extract libusb with 7zip
+  - Copy `<path\to\extracted\libusb>\MS64\dll\libusb-1.0.dll` to `C:\Windows\System32\`
+  - Run `pip install pyusb`
 
-Now you should be able to run `python read.py` from a terminal to read the
+Now you should be able to run `python scripts\read.py` from a terminal to read the
 output from the debug target.
 
 ### Known Limitations
