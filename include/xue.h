@@ -30,6 +30,7 @@
 /* Supported xHC PCI configurations */
 #define XUE_XHC_CLASSC 0xC0330ULL
 #define XUE_XHC_VEN_INTEL 0x8086ULL
+#define XUE_XHC_DEV_C230 0xA12FULL
 #define XUE_XHC_DEV_Z370 0xA2AFULL
 #define XUE_XHC_DEV_Z390 0xA36DULL
 #define XUE_XHC_DEV_WILDCAT_POINT 0x9CB1ULL
@@ -62,6 +63,7 @@
 static inline int known_xhc(uint32_t dev_ven)
 {
     switch (dev_ven) {
+    case (XUE_XHC_DEV_C230 << 16) | XUE_XHC_VEN_INTEL:
     case (XUE_XHC_DEV_Z370 << 16) | XUE_XHC_VEN_INTEL:
     case (XUE_XHC_DEV_Z390 << 16) | XUE_XHC_VEN_INTEL:
     case (XUE_XHC_DEV_WILDCAT_POINT << 16) | XUE_XHC_VEN_INTEL:
