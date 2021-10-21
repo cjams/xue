@@ -17,6 +17,7 @@ tested to work:
 
   - Z370 (PCI device 0xA2AF)
   - Z390 (PCI device 0xA36D)
+  - Series 100/C230 (PCI device 0xA12F)
   - Wildcat Point-LP (PCI device 0x9CB1)
   - Sunrise Point-LP (PCI device 0x9D2F)
   - Cannon Point-LP (PCI device 0x9DED)
